@@ -20,6 +20,7 @@
 - **도메인 화이트리스트** — `*.github.com` 같은 와일드카드 패턴 지원, 미등록 도메인은 자동 차단 (default-deny)
 - **접근 로그** — JSON 구조화 로그로 소스 IP, 도메인, 상태 코드, 전송 바이트, 응답 시간 기록
 - **선택적 인증** — Proxy-Authorization 기반 Basic Auth 지원
+- **게이트웨이 모드** — iptables + redsocks 기반 투명 프록시, 호스트의 모든 HTTP/HTTPS 트래픽을 자동 라우팅
 - **Docker 지원** — 클라이언트 모드 / 서버 모드 컨테이너로 간편 배포
 - **단일 바이너리** — Go로 작성되어 의존성 없이 배포 가능, 크로스 컴파일 지원
 
@@ -60,6 +61,36 @@ docker run --rm \
   git clone https://github.com/user/repo
 ```
 
+### 게이트웨이 모드 (투명 프록시)
+
+게이트웨이 모드는 호스트의 모든 아웃바운드 HTTP/HTTPS 트래픽을 iptables로 투명하게 가로채어 프록시 서버로 라우팅합니다. 애플리케이션의 프록시 설정 없이도 모든 트래픽이 프록시를 경유합니다.
+
+**주의:** `--net=host`와 `NET_ADMIN`, `NET_RAW` 권한이 필요합니다. 호스트의 iptables를 수정하므로 신중하게 사용하세요.
+
+```bash
+# 모든 HTTP/HTTPS 트래픽을 프록시로 라우팅
+docker run -d --rm \
+  --net=host \
+  --cap-add=NET_ADMIN \
+  --cap-add=NET_RAW \
+  -e SLUICE_MODE=gateway \
+  -e SLUICE_PROXY_HOST=192.168.1.100 \
+  -e SLUICE_PROXY_PORT=8080 \
+  ghcr.io/ggos3/sluice
+
+# 특정 도메인만 프록시로 라우팅
+docker run -d --rm \
+  --net=host \
+  --cap-add=NET_ADMIN \
+  --cap-add=NET_RAW \
+  -e SLUICE_MODE=gateway \
+  -e SLUICE_PROXY_HOST=192.168.1.100 \
+  -e SLUICE_PROXY_DOMAINS="github.com,*.github.com,pypi.org" \
+  ghcr.io/ggos3/sluice
+```
+
+컨테이너를 중지하면 iptables 규칙이 자동으로 정리됩니다.
+
 ### Docker Compose
 
 ```yaml
@@ -86,11 +117,13 @@ services:
 
 | 변수 | 설명 | 기본값 |
 |---|---|---|
-| `SLUICE_MODE` | `server` 또는 `client` | `client` |
+| `SLUICE_MODE` | `server`, `client`, 또는 `gateway` | `client` |
 | `SLUICE_PROXY_HOST` | 프록시 서버 주소 (클라이언트 모드 필수) | - |
 | `SLUICE_PROXY_PORT` | 프록시 서버 포트 | `8080` |
 | `SLUICE_PROXY_USER` | 프록시 인증 사용자 | - |
 | `SLUICE_PROXY_PASS` | 프록시 인증 비밀번호 | - |
+| `SLUICE_PROXY_DOMAINS` | 프록시할 도메인 목록 (콤마 구분, 게이트웨이 모드) | - |
+| `SLUICE_REDIRECT_PORTS` | 리다이렉트 포트 모드 (게이트웨이 모드) | `http` |
 | `SLUICE_NO_PROXY` | 프록시 제외 대상 | `localhost,127.0.0.1,...` |
 | `SLUICE_CONFIG` | 서버 모드 설정 파일 경로 | `/etc/sluice/config.yaml` |
 
@@ -241,7 +274,7 @@ sluice/
 ├── configs/config.yaml            # 예제 설정 파일
 ├── scripts/setup-client.sh        # 클라이언트 설정 스크립트
 ├── Dockerfile                     # 멀티 스테이지 Docker 이미지
-├── docker-entrypoint.sh           # 클라이언트/서버 모드 엔트리포인트
+├── docker-entrypoint.sh           # 서버/클라이언트/게이트웨이 모드 엔트리포인트
 ├── docker-compose.yml             # Compose 예제
 └── Makefile
 ```

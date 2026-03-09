@@ -19,7 +19,7 @@ ARG VERSION=dev
 LABEL org.opencontainers.image.title="sluice" \
       org.opencontainers.image.version="${VERSION}"
 
-RUN apk add --no-cache ca-certificates curl git wget
+RUN apk add --no-cache bind-tools ca-certificates curl git ipset iptables redsocks wget
 
 COPY --from=builder /out/sluice /usr/local/bin/sluice
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
