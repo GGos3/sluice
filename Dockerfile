@@ -27,9 +27,9 @@ RUN apk add --no-cache bind-tools ca-certificates curl git ipset iptables redsoc
 
 COPY --from=builder /out/sluice /usr/local/bin/sluice
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-COPY configs/config.yaml /etc/sluice/config.yaml
+RUN mkdir -p /etc/sluice
 
-ENV SLUICE_MODE=client
+ENV SLUICE_MODE=run
 
 EXPOSE 8080
 ENTRYPOINT ["docker-entrypoint.sh"]

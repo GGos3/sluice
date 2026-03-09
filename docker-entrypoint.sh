@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-SLUICE_MODE="${SLUICE_MODE:-client}"
+SLUICE_MODE="${SLUICE_MODE:-run}"
 
 case "$SLUICE_MODE" in
   server)
@@ -11,7 +11,7 @@ case "$SLUICE_MODE" in
     fi
     exec sluice -config "$CONFIG_PATH" "$@"
     ;;
-  client)
+  run)
     PROXY_HOST="${SLUICE_PROXY_HOST:-}"
     PROXY_PORT="${SLUICE_PROXY_PORT:-8080}"
     PROXY_USER="${SLUICE_PROXY_USER:-}"
@@ -19,7 +19,7 @@ case "$SLUICE_MODE" in
     NO_PROXY="${SLUICE_NO_PROXY:-localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}"
 
     if [ -z "$PROXY_HOST" ]; then
-      echo "error: SLUICE_PROXY_HOST is required in client mode" >&2
+      echo "error: SLUICE_PROXY_HOST is required in run mode" >&2
       echo "usage: docker run -e SLUICE_PROXY_HOST=192.168.1.100 ghcr.io/ggos3/sluice [command]" >&2
       exit 1
     fi
@@ -46,7 +46,7 @@ case "$SLUICE_MODE" in
       git config --global https.proxy "$PROXY_URL"
     fi
 
-    echo "sluice: client mode activated"
+    echo "sluice: run mode activated"
     echo "sluice: proxy -> $PROXY_URL"
     echo "sluice: no_proxy -> $NO_PROXY"
 
@@ -262,7 +262,7 @@ EOF
     run_gateway_mode
     ;;
   *)
-    echo "error: unknown SLUICE_MODE: $SLUICE_MODE (use 'server', 'client', or 'gateway')" >&2
+    echo "error: unknown SLUICE_MODE: $SLUICE_MODE (use 'server', 'run', or 'gateway')" >&2
     exit 1
     ;;
 esac
