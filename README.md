@@ -21,52 +21,42 @@
 - **접근 로그** — JSON 구조화 로그로 소스 IP, 도메인, 상태 코드, 전송 바이트, 응답 시간 기록
 - **선택적 인증** — Proxy-Authorization 기반 Basic Auth 지원
 - **게이트웨이 모드** — iptables + redsocks 기반 투명 프록시, 호스트의 모든 HTTP/HTTPS 트래픽을 자동 라우팅
-- **Docker 지원** — 클라이언트 모드 / 서버 모드 컨테이너로 간편 배포
+- **Docker 지원** — server / run / gateway 모드 컨테이너로 간편 배포
 - **단일 바이너리** — Go로 작성되어 의존성 없이 배포 가능, 크로스 컴파일 지원
 
 ## 빠른 시작
 
-> **복사/붙여넣기 팁:** 아래 명령어를 복사할 때 각 줄 사이에 빈 줄이 들어가면 실행되지 않습니다.
-> 코드 블록 우측 상단의 복사 버튼을 사용하거나, 명령어 전체를 드래그하여 복사하세요.
+sluice는 세 가지 모드로 동작합니다:
 
-### Docker로 프록시 서버 실행 (서버 모드)
+| 모드 | 용도 | 필요한 것 |
+|------|------|-----------|
+| **server** | 프록시 서버 실행 | 없음 (설정 자동 생성) |
+| **run** | 프록시 경유로 명령어 실행 | 서버 주소 (`SLUICE_PROXY_HOST`) |
+| **gateway** | 호스트 전체 트래픽 투명 프록시 | 서버 주소 + 루트 권한 |
 
-```bash
-docker run -d -e SLUICE_MODE=server -p 8080:8080 -v ./config.yaml:/etc/sluice/config.yaml:ro ghcr.io/ggos3/sluice
-```
+### 서버 모드
 
-### Docker로 프록시 사용 (클라이언트 모드)
+프록시 서버를 실행합니다. HTTP 요청은 직접 포워딩하고, HTTPS 요청은 CONNECT 터널링으로 처리합니다. 설정 파일이 없으면 기본값(화이트리스트 비활성, 인증 비활성)으로 자동 생성됩니다.
 
-방화벽이 있는 서버에서 프록시를 경유하여 명령어를 실행합니다.
-
-```bash
-# 프록시를 통해 패키지 설치
-docker run --rm -e SLUICE_PROXY_HOST=192.168.1.100 ghcr.io/ggos3/sluice curl https://example.com
-
-# 인터랙티브 셸 (프록시 자동 설정됨)
-docker run -it --rm -e SLUICE_PROXY_HOST=192.168.1.100 ghcr.io/ggos3/sluice
-
-# 인증이 필요한 경우
-docker run --rm -e SLUICE_PROXY_HOST=192.168.1.100 -e SLUICE_PROXY_USER=user1 -e SLUICE_PROXY_PASS=secret ghcr.io/ggos3/sluice git clone https://github.com/user/repo
-```
-
-### 게이트웨이 모드 (투명 프록시)
-
-게이트웨이 모드는 호스트의 모든 아웃바운드 HTTP/HTTPS 트래픽을 iptables로 투명하게 가로채어 프록시 서버로 라우팅합니다. 애플리케이션의 프록시 설정 없이도 모든 트래픽이 프록시를 경유합니다.
-
-**주의:** `--net=host`와 `NET_ADMIN`, `NET_RAW` 권한이 필요합니다. 호스트의 iptables를 수정하므로 신중하게 사용하세요.
+#### Docker
 
 ```bash
-# 모든 HTTP/HTTPS 트래픽을 프록시로 라우팅
-docker run -d --rm --net=host --cap-add=NET_ADMIN --cap-add=NET_RAW -e SLUICE_MODE=gateway -e SLUICE_PROXY_HOST=192.168.1.100 -e SLUICE_PROXY_PORT=8080 ghcr.io/ggos3/sluice
-
-# 특정 도메인만 프록시로 라우팅
-docker run -d --rm --net=host --cap-add=NET_ADMIN --cap-add=NET_RAW -e SLUICE_MODE=gateway -e SLUICE_PROXY_HOST=192.168.1.100 -e SLUICE_PROXY_DOMAINS="github.com,*.github.com,pypi.org" ghcr.io/ggos3/sluice
+docker run -d --name sluice -e SLUICE_MODE=server -p 8080:8080 ghcr.io/ggos3/sluice
 ```
 
-컨테이너를 중지하면 iptables 규칙이 자동으로 정리됩니다.
+커스텀 설정 파일을 사용하려면 `-v` 옵션으로 마운트합니다:
 
-### Docker Compose
+```bash
+docker run -d --name sluice -e SLUICE_MODE=server -p 8080:8080 -v ./config.yaml:/etc/sluice/config.yaml:ro ghcr.io/ggos3/sluice
+```
+
+정지 및 삭제:
+
+```bash
+docker stop sluice && docker rm sluice
+```
+
+#### Docker Compose
 
 ```yaml
 services:
@@ -76,24 +66,89 @@ services:
       SLUICE_MODE: server
     ports:
       - "8080:8080"
-    volumes:
-      - ./config.yaml:/etc/sluice/config.yaml:ro
+```
 
-  worker:
+```bash
+docker compose up -d sluice-server    # 실행
+docker compose down                   # 정지
+```
+
+### Run 모드
+
+프록시 서버를 경유하여 명령어를 실행합니다. 컨테이너는 명령 완료 후 자동으로 제거됩니다.
+
+```bash
+docker run --rm -e SLUICE_PROXY_HOST=192.168.1.100 ghcr.io/ggos3/sluice curl https://example.com
+
+docker run --rm -e SLUICE_PROXY_HOST=192.168.1.100 ghcr.io/ggos3/sluice wget https://example.com/file.tar.gz
+
+docker run --rm -e SLUICE_PROXY_HOST=192.168.1.100 ghcr.io/ggos3/sluice git clone https://github.com/user/repo
+
+docker run --rm -e SLUICE_PROXY_HOST=192.168.1.100 ghcr.io/ggos3/sluice npm install
+```
+
+인터랙티브 셸 (프록시 환경변수가 자동 설정된 셸):
+
+```bash
+docker run -it --rm -e SLUICE_PROXY_HOST=192.168.1.100 ghcr.io/ggos3/sluice
+```
+
+프록시 인증이 필요한 경우:
+
+```bash
+docker run --rm -e SLUICE_PROXY_HOST=192.168.1.100 -e SLUICE_PROXY_USER=user1 -e SLUICE_PROXY_PASS=secret ghcr.io/ggos3/sluice curl https://example.com
+```
+
+### 게이트웨이 모드
+
+호스트의 모든 아웃바운드 HTTP/HTTPS 트래픽을 iptables로 투명하게 가로채어 프록시 서버로 라우팅합니다. 애플리케이션에 프록시 설정을 하지 않아도 모든 트래픽이 자동으로 프록시를 경유합니다.
+
+**주의:** `--net=host`와 `NET_ADMIN`, `NET_RAW` 권한이 필요합니다. 호스트의 iptables를 수정하므로 신중하게 사용하세요.
+
+#### Docker
+
+```bash
+docker run -d --name sluice-gw --net=host --cap-add=NET_ADMIN --cap-add=NET_RAW -e SLUICE_MODE=gateway -e SLUICE_PROXY_HOST=192.168.1.100 ghcr.io/ggos3/sluice
+```
+
+특정 도메인만 프록시하려면 `SLUICE_PROXY_DOMAINS`를 지정합니다:
+
+```bash
+docker run -d --name sluice-gw --net=host --cap-add=NET_ADMIN --cap-add=NET_RAW -e SLUICE_MODE=gateway -e SLUICE_PROXY_HOST=192.168.1.100 -e SLUICE_PROXY_DOMAINS="github.com,*.github.com,pypi.org" ghcr.io/ggos3/sluice
+```
+
+정지 (iptables 규칙 자동 정리):
+
+```bash
+docker stop sluice-gw && docker rm sluice-gw
+```
+
+#### Docker Compose
+
+```yaml
+services:
+  sluice-gateway:
     image: ghcr.io/ggos3/sluice
     environment:
-      SLUICE_PROXY_HOST: sluice-server
-    command: ["curl", "https://example.com"]
-    depends_on:
-      - sluice-server
+      SLUICE_MODE: gateway
+      SLUICE_PROXY_HOST: 192.168.1.100
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+```
+
+```bash
+docker compose up -d sluice-gateway    # 실행
+docker compose down                    # 정지 (iptables 자동 정리)
 ```
 
 ### 환경 변수
 
 | 변수 | 설명 | 기본값 |
 |---|---|---|
-| `SLUICE_MODE` | `server`, `client`, 또는 `gateway` | `client` |
-| `SLUICE_PROXY_HOST` | 프록시 서버 주소 (클라이언트 모드 필수) | - |
+| `SLUICE_MODE` | `server`, `run`, 또는 `gateway` | `run` |
+| `SLUICE_PROXY_HOST` | 프록시 서버 주소 (run/gateway 모드 필수) | - |
 | `SLUICE_PROXY_PORT` | 프록시 서버 포트 | `8080` |
 | `SLUICE_PROXY_USER` | 프록시 인증 사용자 | - |
 | `SLUICE_PROXY_PASS` | 프록시 인증 비밀번호 | - |
@@ -124,7 +179,7 @@ make cross-build
 
 ## 설정
 
-`configs/config.yaml`을 수정하여 사용합니다.
+설정 파일 없이 서버를 시작하면 기본값으로 설정 파일이 자동 생성됩니다 (Docker: `/etc/sluice/config.yaml`, 바이너리: `configs/config.yaml`). 도메인 화이트리스트나 인증이 필요한 경우 `configs/config.yaml`을 참고하여 커스텀 설정 파일을 작성합니다.
 
 ```yaml
 server:
@@ -249,7 +304,7 @@ sluice/
 ├── configs/config.yaml            # 예제 설정 파일
 ├── scripts/setup-client.sh        # 클라이언트 설정 스크립트
 ├── Dockerfile                     # 멀티 스테이지 Docker 이미지
-├── docker-entrypoint.sh           # 서버/클라이언트/게이트웨이 모드 엔트리포인트
+├── docker-entrypoint.sh           # server/run/gateway 모드 엔트리포인트
 ├── docker-compose.yml             # Compose 예제
 └── Makefile
 ```

@@ -5,7 +5,7 @@
 **Branch:** main
 
 ## OVERVIEW
-`sluice` is a single-binary Go forward proxy for firewalled environments. Core concerns: whitelist enforcement, optional proxy auth, structured access logging, Docker client/server/gateway operation.
+`sluice` is a single-binary Go forward proxy for firewalled environments. Core concerns: whitelist enforcement, optional proxy auth, structured access logging, Docker server/run/gateway operation.
 
 ## STRUCTURE
 ```text
@@ -36,7 +36,7 @@ sluice/
 | Change example runtime settings | `configs/config.yaml` | Sample domains and logging/auth defaults |
 | Change dev workflow | `Makefile` | Canonical build/test/fmt/cross-build targets |
 | Change CI/CD pipeline | `.github/workflows/docker-publish.yml` | Test → multi-platform build → GHCR push |
-| Change client/gateway shell flow | `scripts/setup-client.sh`, `docker-entrypoint.sh` | Root/system tool requirements live here |
+| Change run/gateway shell flow | `scripts/setup-client.sh`, `docker-entrypoint.sh` | Root/system tool requirements live here |
 
 ## CODE MAP
 | Unit | Kind | Location | Role |
@@ -81,5 +81,5 @@ make cross-build
 ## NOTES
 - Tooling in this environment may lack `go`; if verification fails due to missing toolchain, treat that as environment-specific rather than repo breakage.
 - CI runs via `.github/workflows/docker-publish.yml`: tests on every push, multi-platform Docker build + GHCR push on `main` (`:dev` tag) and on release (semver tags + `:latest`).
-- Docker mode names are operationally important: `server`, `client`, `gateway`.
-- `docker-entrypoint.sh` rejects missing `SLUICE_PROXY_HOST` in client/gateway mode and downgrades unsupported `SLUICE_REDIRECT_PORTS=all`.
+- Docker mode names are operationally important: `server`, `run`, `gateway`.
+- `docker-entrypoint.sh` rejects missing `SLUICE_PROXY_HOST` in run/gateway mode and downgrades unsupported `SLUICE_REDIRECT_PORTS=all`.
