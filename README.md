@@ -26,14 +26,13 @@
 
 ## 빠른 시작
 
+> **복사/붙여넣기 팁:** 아래 명령어를 복사할 때 각 줄 사이에 빈 줄이 들어가면 실행되지 않습니다.
+> 코드 블록 우측 상단의 복사 버튼을 사용하거나, 명령어 전체를 드래그하여 복사하세요.
+
 ### Docker로 프록시 서버 실행 (서버 모드)
 
 ```bash
-docker run -d \
-  -e SLUICE_MODE=server \
-  -p 8080:8080 \
-  -v ./config.yaml:/etc/sluice/config.yaml:ro \
-  ghcr.io/ggos3/sluice
+docker run -d -e SLUICE_MODE=server -p 8080:8080 -v ./config.yaml:/etc/sluice/config.yaml:ro ghcr.io/ggos3/sluice
 ```
 
 ### Docker로 프록시 사용 (클라이언트 모드)
@@ -42,23 +41,13 @@ docker run -d \
 
 ```bash
 # 프록시를 통해 패키지 설치
-docker run --rm \
-  -e SLUICE_PROXY_HOST=192.168.1.100 \
-  ghcr.io/ggos3/sluice \
-  curl https://example.com
+docker run --rm -e SLUICE_PROXY_HOST=192.168.1.100 ghcr.io/ggos3/sluice curl https://example.com
 
 # 인터랙티브 셸 (프록시 자동 설정됨)
-docker run -it --rm \
-  -e SLUICE_PROXY_HOST=192.168.1.100 \
-  ghcr.io/ggos3/sluice
+docker run -it --rm -e SLUICE_PROXY_HOST=192.168.1.100 ghcr.io/ggos3/sluice
 
 # 인증이 필요한 경우
-docker run --rm \
-  -e SLUICE_PROXY_HOST=192.168.1.100 \
-  -e SLUICE_PROXY_USER=user1 \
-  -e SLUICE_PROXY_PASS=secret \
-  ghcr.io/ggos3/sluice \
-  git clone https://github.com/user/repo
+docker run --rm -e SLUICE_PROXY_HOST=192.168.1.100 -e SLUICE_PROXY_USER=user1 -e SLUICE_PROXY_PASS=secret ghcr.io/ggos3/sluice git clone https://github.com/user/repo
 ```
 
 ### 게이트웨이 모드 (투명 프록시)
@@ -69,24 +58,10 @@ docker run --rm \
 
 ```bash
 # 모든 HTTP/HTTPS 트래픽을 프록시로 라우팅
-docker run -d --rm \
-  --net=host \
-  --cap-add=NET_ADMIN \
-  --cap-add=NET_RAW \
-  -e SLUICE_MODE=gateway \
-  -e SLUICE_PROXY_HOST=192.168.1.100 \
-  -e SLUICE_PROXY_PORT=8080 \
-  ghcr.io/ggos3/sluice
+docker run -d --rm --net=host --cap-add=NET_ADMIN --cap-add=NET_RAW -e SLUICE_MODE=gateway -e SLUICE_PROXY_HOST=192.168.1.100 -e SLUICE_PROXY_PORT=8080 ghcr.io/ggos3/sluice
 
 # 특정 도메인만 프록시로 라우팅
-docker run -d --rm \
-  --net=host \
-  --cap-add=NET_ADMIN \
-  --cap-add=NET_RAW \
-  -e SLUICE_MODE=gateway \
-  -e SLUICE_PROXY_HOST=192.168.1.100 \
-  -e SLUICE_PROXY_DOMAINS="github.com,*.github.com,pypi.org" \
-  ghcr.io/ggos3/sluice
+docker run -d --rm --net=host --cap-add=NET_ADMIN --cap-add=NET_RAW -e SLUICE_MODE=gateway -e SLUICE_PROXY_HOST=192.168.1.100 -e SLUICE_PROXY_DOMAINS="github.com,*.github.com,pypi.org" ghcr.io/ggos3/sluice
 ```
 
 컨테이너를 중지하면 iptables 규칙이 자동으로 정리됩니다.
