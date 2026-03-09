@@ -1,0 +1,22 @@
+services:
+  sluice-server:
+    build: .
+    image: ghcr.io/ggos3/sluice:latest
+    environment:
+      SLUICE_MODE: server
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./configs/config.yaml:/etc/sluice/config.yaml:ro
+    restart: unless-stopped
+
+  sluice-client:
+    build: .
+    image: ghcr.io/ggos3/sluice:latest
+    environment:
+      SLUICE_MODE: client
+      SLUICE_PROXY_HOST: sluice-server
+      SLUICE_PROXY_PORT: "8080"
+    depends_on:
+      - sluice-server
+    command: ["curl", "-v", "https://example.com"]

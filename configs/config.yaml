@@ -1,0 +1,57 @@
+# sluice configuration
+# Forward proxy server with domain whitelisting
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  read_timeout: 30    # seconds
+  write_timeout: 30   # seconds
+  idle_timeout: 120   # seconds
+
+# Domain whitelist configuration
+# When enabled, only listed domains are accessible through the proxy
+whitelist:
+  enabled: true
+  domains:
+    # Go ecosystem
+    - "go.dev"
+    - "*.golang.org"
+    - "proxy.golang.org"
+    - "sum.golang.org"
+    - "storage.googleapis.com"
+
+    # GitHub
+    - "github.com"
+    - "*.github.com"
+    - "*.githubusercontent.com"
+    - "*.github.io"
+
+    # Package registries
+    - "registry.npmjs.org"
+    - "pypi.org"
+    - "*.pypi.org"
+    - "files.pythonhosted.org"
+
+    # Docker
+    - "*.docker.io"
+    - "*.docker.com"
+    - "registry-1.docker.io"
+    - "auth.docker.io"
+    - "production.cloudflare.docker.com"
+
+    # Common utilities
+    - "example.com"
+
+# Logging configuration
+logging:
+  level: "info"       # debug, info, warn, error
+  format: "json"      # json or text
+  access_log: "stdout" # stdout, stderr, or file path
+
+# Optional proxy authentication
+# When enabled, clients must provide Proxy-Authorization header
+auth:
+  enabled: false
+  credentials:
+    - username: "user1"
+      password: "changeme"
