@@ -1,0 +1,88 @@
+name: Docker Publish
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: go test -v -race -count=1 ./...
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set build metadata
+        id: meta_env
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            echo "version=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # dev tag on every main push
+            type=raw,value=dev,enable=${{ github.event_name == 'push' }}
+            # semver tags on release
+            type=semver,pattern={{version}},enable=${{ github.event_name == 'release' }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ github.event_name == 'release' }}
+            type=semver,pattern={{major}},enable=${{ github.event_name == 'release' && !startsWith(github.event.release.tag_name, 'v0.') }}
+            # latest only on release
+            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.meta_env.outputs.version }}
+            BUILD_TIME=${{ steps.meta_env.outputs.build_time }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
