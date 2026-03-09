@@ -38,7 +38,7 @@ func main() {
 }
 
 func run(configPath string) error {
-	cfg, err := config.Load(configPath)
+	cfg, generated, err := config.Ensure(configPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -46,6 +46,10 @@ func run(configPath string) error {
 	log, err := logger.Setup(cfg.Logging.Level, cfg.Logging.Format, cfg.Logging.AccessLog)
 	if err != nil {
 		return fmt.Errorf("setup logger: %w", err)
+	}
+
+	if generated {
+		log.Info("generated default config", "path", configPath)
 	}
 
 	whitelist := acl.New(cfg.Whitelist.Enabled, cfg.Whitelist.Domains)

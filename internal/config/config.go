@@ -1,9 +1,12 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -88,6 +91,71 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// Default returns a Config populated with sensible defaults.
+// Whitelist and auth are disabled so the server starts without
+// requiring domain lists or credentials.
+func Default() *Config {
+	return &Config{
+		Server: ServerConfig{
+			Host:         defaultHost,
+			Port:         defaultPort,
+			ReadTimeout:  defaultReadTimeout,
+			WriteTimeout: defaultWriteTimeout,
+			IdleTimeout:  defaultIdleTimeout,
+		},
+		Whitelist: WhitelistConfig{
+			Enabled: false,
+		},
+		Logging: LoggingConfig{
+			Level:     defaultLogLevel,
+			Format:    defaultLogFormat,
+			AccessLog: defaultAccessLog,
+		},
+		Auth: AuthConfig{
+			Enabled: false,
+		},
+	}
+}
+
+// Ensure loads config from path if it exists, or generates a default
+// config file at path and returns the default config. The boolean
+// return value is true when a new default file was created.
+func Ensure(path string) (*Config, bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		cfg, loadErr := Load(path)
+		return cfg, false, loadErr
+	}
+
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, false, fmt.Errorf("stat config: %w", err)
+	}
+
+	cfg := Default()
+	if err := writeDefault(path, cfg); err != nil {
+		return nil, false, fmt.Errorf("generate default config: %w", err)
+	}
+
+	return cfg, true, nil
+}
+
+func writeDefault(path string, cfg *Config) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create config directory: %w", err)
+	}
+
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+
+	if err := enc.Encode(cfg); err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	return os.WriteFile(path, buf.Bytes(), 0o644)
 }
 
 func (c *Config) Address() string {
