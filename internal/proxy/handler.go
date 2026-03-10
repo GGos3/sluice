@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/base64"
@@ -15,14 +16,16 @@ import (
 	"time"
 
 	"github.com/ggos3/sluice/internal/acl"
+	"github.com/ggos3/sluice/internal/dns"
 	"github.com/ggos3/sluice/internal/logger"
 )
 
 type Handler struct {
-	whitelist *acl.Whitelist
-	logger    *slog.Logger
-	transport *http.Transport
-	auth      *authConfig
+	whitelist  *acl.Whitelist
+	logger     *slog.Logger
+	dnsHandler http.Handler
+	transport  *http.Transport
+	auth       *authConfig
 }
 
 type authConfig struct {
@@ -42,7 +45,7 @@ func WithAuth(credentials map[string]string) Option {
 	}
 }
 
-func NewHandler(whitelist *acl.Whitelist, logger *slog.Logger, opts ...Option) *Handler {
+func NewHandler(whitelist *acl.Whitelist, logger *slog.Logger, args ...any) *Handler {
 	dialer := &net.Dialer{
 		Timeout:   30 * time.Second,
 		KeepAlive: 30 * time.Second,
@@ -64,9 +67,18 @@ func NewHandler(whitelist *acl.Whitelist, logger *slog.Logger, opts ...Option) *
 		},
 	}
 
-	for _, opt := range opts {
-		if opt != nil {
-			opt(h)
+	for _, arg := range args {
+		switch value := arg.(type) {
+		case nil:
+			continue
+		case http.Handler:
+			if h.dnsHandler == nil {
+				h.dnsHandler = value
+			}
+		case Option:
+			if value != nil {
+				value(h)
+			}
 		}
 	}
 
@@ -74,6 +86,41 @@ func NewHandler(whitelist *acl.Whitelist, logger *slog.Logger, opts ...Option) *
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost && r.URL != nil && !r.URL.IsAbs() && r.URL.Path == "/dns-query" {
+		if h.dnsHandler == nil {
+			http.NotFound(w, r)
+			return
+		}
+
+		if !h.authorized(r) {
+			w.Header().Set("Proxy-Authenticate", `Basic realm="proxy"`)
+			http.Error(w, http.StatusText(http.StatusProxyAuthRequired), http.StatusProxyAuthRequired)
+			return
+		}
+
+		payload, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		r.Body = io.NopCloser(bytes.NewReader(payload))
+
+		domain, err := dns.QueryDomain(payload)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		if !h.isAllowed(domain) {
+			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+			return
+		}
+
+		h.dnsHandler.ServeHTTP(w, r)
+		return
+	}
+
 	if r.Method == http.MethodConnect {
 		h.handleConnect(w, r)
 		return

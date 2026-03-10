@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ggos3/sluice/internal/acl"
+	"golang.org/x/net/dns/dnsmessage"
 )
 
 func TestHandleHTTPAllowedRequest(t *testing.T) {
@@ -179,6 +180,200 @@ func TestHandleHTTPAuthInvalidCredentials(t *testing.T) {
 	}
 }
 
+func TestServeHTTPRoutesDNSQuery(t *testing.T) {
+	var called bool
+	queryPayload := buildDNSQueryPayload(t, "example.com.")
+
+	dnsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want %s", r.Method, http.MethodPost)
+		}
+		if r.URL.Path != "/dns-query" {
+			t.Fatalf("path = %q, want /dns-query", r.URL.Path)
+		}
+		payload, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		if !bytes.Equal(payload, queryPayload) {
+			t.Fatalf("body payload mismatch")
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = io.WriteString(w, "dns")
+	})
+
+	handler := NewHandler(acl.New(true, []string{"example.com"}), nil, dnsHandler, WithAuth(map[string]string{"user": "pass"}))
+	req := httptest.NewRequest(http.MethodPost, "/dns-query", bytes.NewReader(queryPayload))
+	req.Header.Set("Proxy-Authorization", formatBasicAuth("user", "pass"))
+	resp := httptest.NewRecorder()
+
+	handler.ServeHTTP(resp, req)
+
+	result := resp.Result()
+	defer result.Body.Close()
+
+	if !called {
+		t.Fatal("dns handler was not called")
+	}
+	if result.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", result.StatusCode, http.StatusAccepted)
+	}
+	body, err := io.ReadAll(result.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if got := string(body); got != "dns" {
+		t.Fatalf("body = %q, want %q", got, "dns")
+	}
+}
+
+func TestServeHTTPDNSQueryReturnsNotFoundWithoutDNSHandler(t *testing.T) {
+	handler := NewHandler(acl.New(true, []string{"example.com"}), nil, nil, WithAuth(map[string]string{"user": "pass"}))
+	req := httptest.NewRequest(http.MethodPost, "/dns-query", strings.NewReader("query"))
+	resp := httptest.NewRecorder()
+
+	handler.ServeHTTP(resp, req)
+
+	result := resp.Result()
+	defer result.Body.Close()
+
+	if result.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", result.StatusCode, http.StatusNotFound)
+	}
+	if got := result.Header.Get("Proxy-Authenticate"); got != "" {
+		t.Fatalf("Proxy-Authenticate = %q, want empty", got)
+	}
+}
+
+func TestServeHTTPRoutesDNSQueryWhenDNSHandlerFollowsOptions(t *testing.T) {
+	var called bool
+
+	handler := NewHandler(
+		acl.New(true, []string{"example.com"}),
+		nil,
+		WithAuth(map[string]string{"user": "pass"}),
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = true
+			w.WriteHeader(http.StatusNoContent)
+		}),
+	)
+	req := httptest.NewRequest(http.MethodPost, "/dns-query", bytes.NewReader(buildDNSQueryPayload(t, "example.com.")))
+	req.Header.Set("Proxy-Authorization", formatBasicAuth("user", "pass"))
+	resp := httptest.NewRecorder()
+
+	handler.ServeHTTP(resp, req)
+
+	result := resp.Result()
+	defer result.Body.Close()
+
+	if !called {
+		t.Fatal("dns handler was not called")
+	}
+	if result.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", result.StatusCode, http.StatusNoContent)
+	}
+}
+
+func TestServeHTTPDNSQueryRequiresProxyAuth(t *testing.T) {
+	called := false
+	handler := NewHandler(
+		acl.New(true, []string{"example.com"}),
+		nil,
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = true
+			w.WriteHeader(http.StatusNoContent)
+		}),
+		WithAuth(map[string]string{"user": "pass"}),
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/dns-query", bytes.NewReader(buildDNSQueryPayload(t, "example.com.")))
+	resp := httptest.NewRecorder()
+
+	handler.ServeHTTP(resp, req)
+
+	result := resp.Result()
+	defer result.Body.Close()
+
+	if called {
+		t.Fatal("dns handler should not be called without proxy auth")
+	}
+	if result.StatusCode != http.StatusProxyAuthRequired {
+		t.Fatalf("status = %d, want %d", result.StatusCode, http.StatusProxyAuthRequired)
+	}
+	if got := result.Header.Get("Proxy-Authenticate"); !strings.Contains(got, "Basic") {
+		t.Fatalf("Proxy-Authenticate = %q, want Basic challenge", got)
+	}
+}
+
+func TestServeHTTPDNSQueryDeniedByWhitelist(t *testing.T) {
+	called := false
+	handler := NewHandler(
+		acl.New(true, []string{"allowed.example"}),
+		nil,
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = true
+			w.WriteHeader(http.StatusNoContent)
+		}),
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/dns-query", bytes.NewReader(buildDNSQueryPayload(t, "blocked.example.")))
+	resp := httptest.NewRecorder()
+
+	handler.ServeHTTP(resp, req)
+
+	result := resp.Result()
+	defer result.Body.Close()
+
+	if called {
+		t.Fatal("dns handler should not be called for denied domain")
+	}
+	if result.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", result.StatusCode, http.StatusForbidden)
+	}
+}
+
+func TestServeHTTPDoesNotInterceptProxiedDNSPath(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want %s", r.Method, http.MethodPost)
+		}
+		if r.URL.Path != "/dns-query" {
+			t.Fatalf("path = %q, want /dns-query", r.URL.Path)
+		}
+		payload, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		if got := string(payload); got != "proxied" {
+			t.Fatalf("body = %q, want %q", got, "proxied")
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, "backend")
+	}))
+	t.Cleanup(backend.Close)
+
+	handler := NewHandler(acl.New(true, []string{"127.0.0.1"}), nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("dns handler should not be reached for proxied requests")
+	}))
+	proxyServer := httptest.NewServer(handler)
+	t.Cleanup(proxyServer.Close)
+
+	resp := doProxyRequestWithBody(t, proxyServer.URL, backend.URL+"/dns-query", http.MethodPost, nil, strings.NewReader("proxied"))
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusCreated)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if got := string(body); got != "backend" {
+		t.Fatalf("body = %q, want %q", got, "backend")
+	}
+}
+
 func TestHandleHTTPAccessLogging(t *testing.T) {
 	var logs safeBuffer
 	accessLogger := slog.New(slog.NewJSONHandler(&logs, nil))
@@ -220,6 +415,11 @@ func TestHandleHTTPAccessLogging(t *testing.T) {
 
 func doProxyRequest(t *testing.T, proxyURL, targetURL, method string, headers http.Header) *http.Response {
 	t.Helper()
+	return doProxyRequestWithBody(t, proxyURL, targetURL, method, headers, nil)
+}
+
+func doProxyRequestWithBody(t *testing.T, proxyURL, targetURL, method string, headers http.Header, body io.Reader) *http.Response {
+	t.Helper()
 	if method == "" {
 		method = http.MethodGet
 	}
@@ -233,7 +433,7 @@ func doProxyRequest(t *testing.T, proxyURL, targetURL, method string, headers ht
 	client := &http.Client{Transport: transport}
 	t.Cleanup(transport.CloseIdleConnections)
 
-	req, err := http.NewRequestWithContext(context.Background(), method, targetURL, nil)
+	req, err := http.NewRequestWithContext(context.Background(), method, targetURL, body)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -276,6 +476,31 @@ func hostPort(t *testing.T, rawURL string) string {
 type safeBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
+}
+
+func buildDNSQueryPayload(t *testing.T, domain string) []byte {
+	t.Helper()
+
+	name, err := dnsmessage.NewName(domain)
+	if err != nil {
+		t.Fatalf("new name: %v", err)
+	}
+
+	builder := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: 42, RecursionDesired: true})
+	builder.EnableCompression()
+	if err := builder.StartQuestions(); err != nil {
+		t.Fatalf("start questions: %v", err)
+	}
+	if err := builder.Question(dnsmessage.Question{Name: name, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET}); err != nil {
+		t.Fatalf("question: %v", err)
+	}
+
+	payload, err := builder.Finish()
+	if err != nil {
+		t.Fatalf("finish query: %v", err)
+	}
+
+	return payload
 }
 
 func (b *safeBuffer) Write(p []byte) (int, error) {
