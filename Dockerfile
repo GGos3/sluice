@@ -13,24 +13,45 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -ldflags "-s -w -X main.version=${VERSION} -X main.buildTime=${BUILD_TIME}" \
-    -o /out/sluice ./cmd/proxy
+    -o /out/sluice ./cmd/sluice
 
-FROM alpine:3.21
+# =============================================================================
+# Target: server
+# =============================================================================
+FROM alpine:3.21 AS server
 
 ARG VERSION=dev
-LABEL org.opencontainers.image.title="sluice" \
+LABEL org.opencontainers.image.title="sluice-server" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.source="https://github.com/ggos3/sluice" \
-      org.opencontainers.image.description="Forward proxy for firewalled environments"
+      org.opencontainers.image.description="Sluice proxy server with SSH tunnel support"
 
-RUN apk add --no-cache bind-tools ca-certificates curl git ipset iptables redsocks wget
+# Install proxy tools + SSH client for tunnel orchestration
+RUN apk add --no-cache bind-tools ca-certificates openssh-client
 
 COPY --from=builder /out/sluice /usr/local/bin/sluice
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN mkdir -p /etc/sluice
 
-ENV SLUICE_MODE=run
-
 EXPOSE 18080
-ENTRYPOINT ["docker-entrypoint.sh"]
-CMD ["sh"]
+
+ENTRYPOINT ["sluice", "server"]
+CMD ["--help"]
+
+# =============================================================================
+# Target: agent
+# =============================================================================
+FROM alpine:3.21 AS agent
+
+ARG VERSION=dev
+LABEL org.opencontainers.image.title="sluice-agent" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.source="https://github.com/ggos3/sluice" \
+      org.opencontainers.image.description="Sluice transparent proxy agent (Linux only)"
+
+# Agent needs minimal tools - just the binary
+RUN apk add --no-cache ca-certificates
+
+COPY --from=builder /out/sluice /usr/local/bin/sluice
+
+ENTRYPOINT ["sluice", "agent"]
+CMD ["--help"]

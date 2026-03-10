@@ -1,35 +1,22 @@
 services:
   sluice-server:
-    build: .
-    image: ghcr.io/ggos3/sluice:latest
-    environment:
-      SLUICE_MODE: server
+    build:
+      context: .
+      target: server
+    image: ghcr.io/ggos3/sluice-server
     ports:
       - "18080:18080"
     restart: unless-stopped
 
-  sluice-run:
-    build: .
-    image: ghcr.io/ggos3/sluice:latest
+  sluice-agent:
+    build:
+      context: .
+      target: agent
+    image: ghcr.io/ggos3/sluice-agent
     environment:
-      SLUICE_MODE: run
-      SLUICE_PROXY_HOST: sluice-server
+      SLUICE_PROXY_HOST: 192.168.1.100
       SLUICE_PROXY_PORT: "18080"
-    depends_on:
-      - sluice-server
-    command: ["curl", "-v", "https://example.com"]
-
-  sluice-gateway:
-    build: .
-    image: ghcr.io/ggos3/sluice:latest
-    environment:
-      SLUICE_MODE: gateway
-      SLUICE_PROXY_HOST: 192.168.1.100  # replace with actual proxy server IP
-      SLUICE_PROXY_PORT: "18080"
-      # SLUICE_PROXY_DOMAINS: "github.com,api.github.com,pypi.org"  # optional: selective domain routing
-      # SLUICE_REDIRECT_PORTS: "http"                                # default: http (80,443)
     network_mode: host
     cap_add:
       - NET_ADMIN
-      - NET_RAW
     restart: unless-stopped
