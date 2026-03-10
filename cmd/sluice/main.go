@@ -77,7 +77,7 @@ func runCmd(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	proxyHost := fs.String("proxy-host", "", "proxy server host (required)")
-	proxyPort := fs.String("proxy-port", "8080", "proxy server port")
+	proxyPort := fs.String("proxy-port", "18080", "proxy server port")
 	proxyUser := fs.String("proxy-user", "", "proxy authentication username")
 	proxyPass := fs.String("proxy-pass", "", "proxy authentication password")
 	noProxy := fs.String("no-proxy", "localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16", "comma-separated list of hosts to bypass proxy")

@@ -14,7 +14,7 @@ import (
 
 const (
 	defaultHost         = "0.0.0.0"
-	defaultPort         = 8080
+	defaultPort         = 18080
 	defaultReadTimeout  = 30
 	defaultWriteTimeout = 30
 	defaultIdleTimeout  = 120

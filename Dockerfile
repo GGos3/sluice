@@ -31,6 +31,6 @@ RUN mkdir -p /etc/sluice
 
 ENV SLUICE_MODE=run
 
-EXPOSE 8080
+EXPOSE 18080
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["sh"]

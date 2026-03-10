@@ -18,7 +18,7 @@ func TestConfigValidate(t *testing.T) {
 			name: "valid config with all defaults except ProxyHost",
 			cfg: &Config{
 				ProxyHost:    "127.0.0.1",
-				ProxyPort:    8080,
+				ProxyPort:    18080,
 				LogLevel:     "info",
 				LogFormat:    "json",
 				TUNName:      "sluice0",

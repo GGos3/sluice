@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	defaultProxyPort    = 8080
+	defaultProxyPort    = 18080
 	defaultLogLevel     = "info"
 	defaultLogFormat    = "json"
 	defaultTUNName      = "sluice0"

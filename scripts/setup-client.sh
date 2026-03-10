@@ -3,7 +3,7 @@
 set -u
 
 SCRIPT_NAME=$(basename "$0")
-DEFAULT_PROXY_PORT=8080
+DEFAULT_PROXY_PORT=18080
 DEFAULT_SSH_PORT=22
 DEFAULT_LOCAL_PORT=3128
 DEFAULT_NO_PROXY="localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
@@ -49,7 +49,7 @@ Usage: ${SCRIPT_NAME} [OPTIONS]
 
 Options:
   --proxy-host HOST    Proxy server hostname/IP (required for install)
-  --proxy-port PORT    Proxy server port (default: 8080)
+  --proxy-port PORT    Proxy server port (default: 18080)
   --proxy-user USER    Proxy authentication username (optional)
   --proxy-pass PASS    Proxy authentication password (optional)
   --ssh-tunnel         Set up SSH tunnel instead of direct connection

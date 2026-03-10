@@ -100,9 +100,9 @@ auth:
 				if cfg.Logging.AccessLog != defaultAccessLog {
 					t.Fatalf("AccessLog = %q, want %q", cfg.Logging.AccessLog, defaultAccessLog)
 				}
-				if got := cfg.Address(); got != "0.0.0.0:8080" {
-					t.Fatalf("Address() = %q, want %q", got, "0.0.0.0:8080")
-				}
+			if got := cfg.Address(); got != "0.0.0.0:18080" {
+				t.Fatalf("Address() = %q, want %q", got, "0.0.0.0:18080")
+			}
 			},
 		},
 		{
@@ -204,8 +204,8 @@ func TestDefault(t *testing.T) {
 	if cfg.Logging.AccessLog != defaultAccessLog {
 		t.Fatalf("AccessLog = %q, want %q", cfg.Logging.AccessLog, defaultAccessLog)
 	}
-	if got := cfg.Address(); got != "0.0.0.0:8080" {
-		t.Fatalf("Address() = %q, want %q", got, "0.0.0.0:8080")
+	if got := cfg.Address(); got != "0.0.0.0:18080" {
+		t.Fatalf("Address() = %q, want %q", got, "0.0.0.0:18080")
 	}
 
 	if err := cfg.validate(); err != nil {
