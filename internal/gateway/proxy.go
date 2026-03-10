@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ggos3/sluice/internal/rules"
 	"golang.org/x/sys/unix"
 )
 
@@ -30,6 +31,7 @@ type ProxyDialer struct {
 	proxyPass string
 	fwmark    int
 	timeout   time.Duration
+	rules     *rules.Engine
 }
 
 // NewProxyDialer creates a new ProxyDialer for the given upstream proxy.
@@ -42,6 +44,10 @@ func NewProxyDialer(proxyAddr string, proxyUser, proxyPass string, fwmark int) *
 		fwmark:    fwmark,
 		timeout:   30 * time.Second,
 	}
+}
+
+func (d *ProxyDialer) SetRulesEngine(engine *rules.Engine) {
+	d.rules = engine
 }
 
 // ForwardHTTP reads an HTTP request from the intercepted connection,
@@ -57,7 +63,16 @@ func (d *ProxyDialer) ForwardHTTP(ctx context.Context, conn net.Conn, dst netip.
 	}
 	defer req.Body.Close()
 
-	outReq, err := d.rewriteRequest(req, dst, host)
+	targetHost := chooseHTTPHost(req, dst, host)
+	if !d.shouldProxy(targetHost, dst) {
+		return d.forwardHTTPDirect(ctx, conn, req, dst, targetHost)
+	}
+
+	return d.forwardHTTPViaProxy(ctx, conn, req, dst, targetHost)
+}
+
+func (d *ProxyDialer) forwardHTTPViaProxy(ctx context.Context, conn net.Conn, req *http.Request, dst netip.AddrPort, targetHost string) error {
+	outReq, err := d.rewriteRequest(req, dst, targetHost)
 	if err != nil {
 		return fmt.Errorf("rewrite request: %w", err)
 	}
@@ -81,6 +96,43 @@ func (d *ProxyDialer) ForwardHTTP(ctx context.Context, conn net.Conn, dst netip.
 	return d.relayResponse(conn, resp)
 }
 
+func (d *ProxyDialer) forwardHTTPDirect(ctx context.Context, conn net.Conn, req *http.Request, dst netip.AddrPort, targetHost string) error {
+	targetAddr := chooseDirectHTTPAddr(req, targetHost, dst)
+
+	upstreamConn, err := d.dialDirect(ctx, targetAddr)
+	if err != nil {
+		return fmt.Errorf("dial target: %w", err)
+	}
+	defer upstreamConn.Close()
+
+	outReq := &http.Request{
+		Method: req.Method,
+		URL:    cloneURL(req.URL),
+		Header: req.Header.Clone(),
+		Body:   req.Body,
+		Host:   targetHost,
+	}
+	if outReq.URL == nil {
+		outReq.URL = &url.URL{Path: "/"}
+	}
+	outReq.URL.Scheme = ""
+	outReq.URL.Host = ""
+	outReq.RequestURI = ""
+	removeHopByHopHeaders(outReq.Header)
+
+	if err := outReq.Write(upstreamConn); err != nil {
+		return fmt.Errorf("send request to target: %w", err)
+	}
+
+	resp, err := http.ReadResponse(bufio.NewReader(upstreamConn), outReq)
+	if err != nil {
+		return fmt.Errorf("read target response: %w", err)
+	}
+	defer resp.Body.Close()
+
+	return d.relayResponse(conn, resp)
+}
+
 func (d *ProxyDialer) ForwardHTTPS(ctx context.Context, conn net.Conn, dst netip.AddrPort, host string) error {
 	serverName, replay, err := ExtractSNI(conn)
 	if err != nil && len(replay) == 0 {
@@ -89,6 +141,10 @@ func (d *ProxyDialer) ForwardHTTPS(ctx context.Context, conn net.Conn, dst netip
 
 	targetHost := chooseConnectHost(serverName, host, dst)
 	targetAddr := net.JoinHostPort(targetHost, "443")
+
+	if !d.shouldProxy(targetHost, dst) {
+		return d.forwardHTTPSDirect(ctx, conn, targetAddr, replay)
+	}
 
 	proxyConn, err := d.dialProxy(ctx)
 	if err != nil {
@@ -107,6 +163,23 @@ func (d *ProxyDialer) ForwardHTTPS(ctx context.Context, conn net.Conn, dst netip
 	}
 
 	transferBidirectional(proxyConn, conn)
+	return nil
+}
+
+func (d *ProxyDialer) forwardHTTPSDirect(ctx context.Context, conn net.Conn, targetAddr string, replay []byte) error {
+	upstreamConn, err := d.dialDirect(ctx, targetAddr)
+	if err != nil {
+		return fmt.Errorf("dial target: %w", err)
+	}
+	defer upstreamConn.Close()
+
+	if len(replay) > 0 {
+		if _, err := upstreamConn.Write(replay); err != nil {
+			return fmt.Errorf("replay client hello: %w", err)
+		}
+	}
+
+	transferBidirectional(upstreamConn, conn)
 	return nil
 }
 
@@ -154,6 +227,14 @@ func (d *ProxyDialer) rewriteRequest(req *http.Request, dst netip.AddrPort, host
 }
 
 func (d *ProxyDialer) dialProxy(ctx context.Context) (net.Conn, error) {
+	return d.dialMarked(ctx, d.proxyAddr)
+}
+
+func (d *ProxyDialer) dialDirect(ctx context.Context, targetAddr string) (net.Conn, error) {
+	return d.dialMarked(ctx, targetAddr)
+}
+
+func (d *ProxyDialer) dialMarked(ctx context.Context, targetAddr string) (net.Conn, error) {
 	dialer := &net.Dialer{
 		Timeout: d.timeout,
 		Control: func(network, address string, c syscall.RawConn) error {
@@ -163,7 +244,70 @@ func (d *ProxyDialer) dialProxy(ctx context.Context) (net.Conn, error) {
 		},
 	}
 
-	return dialer.DialContext(ctx, "tcp", d.proxyAddr)
+	return dialer.DialContext(ctx, "tcp", targetAddr)
+}
+
+func (d *ProxyDialer) shouldProxy(host string, dst netip.AddrPort) bool {
+	if d == nil || d.rules == nil {
+		return true
+	}
+
+	return d.rules.ShouldProxy(host, net.IP(dst.Addr().AsSlice()))
+}
+
+func chooseHTTPHost(req *http.Request, dst netip.AddrPort, host string) string {
+	for _, candidate := range []string{host, req.Host} {
+		if normalized := normalizeRequestHost(candidate); normalized != "" {
+			return normalized
+		}
+	}
+
+	return dst.Addr().String()
+}
+
+func chooseDirectHTTPAddr(req *http.Request, targetHost string, dst netip.AddrPort) string {
+	if req != nil && req.URL != nil {
+		if addr := normalizeHTTPAddress(req.URL.Host, "80"); addr != "" {
+			return addr
+		}
+	}
+
+	if addr := normalizeHTTPAddress(targetHost, "80"); addr != "" {
+		return addr
+	}
+
+	return dst.String()
+}
+
+func normalizeHTTPAddress(value, defaultPort string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+
+	if host, port, err := net.SplitHostPort(value); err == nil {
+		return net.JoinHostPort(host, port)
+	}
+
+	host := normalizeConnectHost(value)
+	if host == "" {
+		return ""
+	}
+
+	return net.JoinHostPort(host, defaultPort)
+}
+
+func normalizeRequestHost(host string) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return ""
+	}
+
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		return strings.Trim(host, "[]")
+	}
+
+	return host
 }
 
 func (d *ProxyDialer) sendConnect(proxyConn net.Conn, targetAddr string) error {

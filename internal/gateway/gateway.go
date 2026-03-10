@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/netip"
 	"strings"
+
+	"github.com/ggos3/sluice/internal/rules"
 )
 
 var gatewayStackAddress = netip.MustParseAddr("10.0.85.2")
@@ -63,6 +65,14 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger) (runErr error) {
 	}()
 
 	dialer := NewProxyDialer(net.JoinHostPort(proxyIP.String(), fmt.Sprint(cfg.ProxyPort)), cfg.ProxyUser, cfg.ProxyPass, cfg.Fwmark)
+	dialer.SetRulesEngine(rules.NewEngine(rules.Config{
+		NoProxyDomains:  cfg.NoProxyDomains,
+		NoProxyIPRanges: cfg.NoProxyIPRanges,
+	}))
+
+	if err := stack.ServeDNSOverHTTPS(netip.AddrPortFrom(netip.IPv4Unspecified(), 53), net.JoinHostPort(cfg.ProxyHost, fmt.Sprint(cfg.ProxyPort)), nil); err != nil {
+		return fmt.Errorf("listen dns: %w", err)
+	}
 
 	httpListener, err := stack.ServeTCP(netip.AddrPortFrom(netip.IPv4Unspecified(), 80), func(conn net.Conn) {
 		handleForward(log, conn, "", func(ctx context.Context, dst netip.AddrPort, host string) error {
