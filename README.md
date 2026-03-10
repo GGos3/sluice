@@ -208,7 +208,7 @@ docker compose down                    # 정지
 | `SLUICE_PROXY_PORT` | 프록시 서버 포트 | `8080` |
 | `SLUICE_PROXY_USER` | 프록시 인증 사용자 | - |
 | `SLUICE_PROXY_PASS` | 프록시 인증 비밀번호 | - |
-| `SLUICE_PROXY_DOMAINS` | Docker 게이트웨이 선택적 도메인 라우팅 (쉼표分隔 도메인列表) | - |
+| `SLUICE_PROXY_DOMAINS` | Docker 게이트웨이 선택적 도메인 라우팅 | - |
 | `SLUICE_REDIRECT_PORTS` | 리다이렉트 포트 모드 (게이트웨이 모드) | `http` |
 | `SLUICE_NO_PROXY` | 프록시 제외 대상 | `localhost,127.0.0.1,...` |
 | `SLUICE_CONFIG` | 서버 모드 설정 파일 경로 | `/etc/sluice/config.yaml` |
