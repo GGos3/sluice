@@ -3,9 +3,11 @@
 package gateway
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/netip"
 	"sync"
 	"sync/atomic"
@@ -18,6 +20,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv6"
 	gtcpipstack "gvisor.dev/gvisor/pkg/tcpip/stack"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
+	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
 	"gvisor.dev/gvisor/pkg/waiter"
 )
 
@@ -27,6 +30,7 @@ const (
 )
 
 type TCPHandler func(net.Conn)
+type DNSHandler func(context.Context, []byte) ([]byte, error)
 
 type Stack struct {
 	tun     *TUNDevice
@@ -63,7 +67,7 @@ func NewStack(name string, localAddr netip.Addr) (*Stack, error) {
 		tun: tun,
 		stack: gtcpipstack.New(gtcpipstack.Options{
 			NetworkProtocols:   []gtcpipstack.NetworkProtocolFactory{ipv4.NewProtocol, ipv6.NewProtocol},
-			TransportProtocols: []gtcpipstack.TransportProtocolFactory{tcp.NewProtocol},
+			TransportProtocols: []gtcpipstack.TransportProtocolFactory{tcp.NewProtocol, udp.NewProtocol},
 		}),
 		closed: make(chan struct{}),
 	}
@@ -145,6 +149,54 @@ func (s *Stack) ServeTCP(addr netip.AddrPort, handler TCPHandler) (net.Listener,
 
 func (s *Stack) serveTCP(addr netip.AddrPort, handler TCPHandler) (net.Listener, error) {
 	return s.ServeTCP(addr, handler)
+}
+
+func (s *Stack) ServeDNS(addr netip.AddrPort, handler DNSHandler) error {
+	if handler == nil {
+		return errors.New("dns handler is required")
+	}
+
+	forwarder := udp.NewForwarder(s.stack, func(request *udp.ForwarderRequest) {
+		id := request.ID()
+		if id.LocalPort != addr.Port() {
+			return
+		}
+
+		var wq waiter.Queue
+		ep, tcpipErr := request.CreateEndpoint(&wq)
+		if tcpipErr != nil {
+			return
+		}
+
+		conn := gonet.NewUDPConn(&wq, ep)
+		go func() {
+			defer conn.Close()
+
+			buffer := make([]byte, 65535)
+			for {
+				n, src, err := conn.ReadFrom(buffer)
+				if err != nil {
+					return
+				}
+
+				response, err := handler(context.Background(), append([]byte(nil), buffer[:n]...))
+				if err != nil || len(response) == 0 {
+					continue
+				}
+
+				if _, err := conn.WriteTo(response, src); err != nil {
+					return
+				}
+			}
+		}()
+	})
+
+	s.stack.SetTransportProtocolHandler(udp.ProtocolNumber, forwarder.HandlePacket)
+	return nil
+}
+
+func (s *Stack) ServeDNSOverHTTPS(addr netip.AddrPort, proxyAddr string, client *http.Client) error {
+	return s.ServeDNS(addr, NewDNSRelayHandler(proxyAddr, client))
 }
 
 func (s *Stack) debugCounts() (rx, tx int64) {
