@@ -12,22 +12,18 @@ GOFLAGS ?=
 .PHONY: all
 all: lint test build
 
-# Build both binaries for current platform
+# Build binary for current platform
 .PHONY: build
-build: build-proxy build-sluice
-
-.PHONY: build-proxy
-build-proxy:
-	$(GO) build $(GOFLAGS) $(LDFLAGS) -o bin/$(BINARY_NAME) ./cmd/proxy
+build: build-sluice
 
 .PHONY: build-sluice
 build-sluice:
 	$(GO) build $(GOFLAGS) $(LDFLAGS) -o bin/$(BINARY_NAME)-cli ./cmd/sluice
 
-# Run the proxy server
+# Run the server
 .PHONY: run
-run: build-proxy
-	./bin/$(BINARY_NAME) -config configs/config.yaml
+run: build-sluice
+	./bin/$(BINARY_NAME)-cli server -config configs/config.yaml
 
 # Run tests
 .PHONY: test
@@ -90,10 +86,9 @@ tidy:
 .PHONY: help
 help:
 	@echo "Available targets:"
-	@echo "  build          - Build both binaries for current platform"
-	@echo "  build-proxy    - Build proxy server (cmd/proxy)"
+	@echo "  build          - Build binary for current platform"
 	@echo "  build-sluice   - Build subcommand CLI (cmd/sluice)"
-	@echo "  run            - Build and run with default config"
+	@echo "  run            - Build and run server with default config"
 	@echo "  test           - Run tests with race detector"
 	@echo "  test-coverage  - Run tests with coverage report"
 	@echo "  lint           - Run linter"

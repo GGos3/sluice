@@ -12,11 +12,12 @@ import (
 	"github.com/ggos3/sluice/internal/logger"
 )
 
-func runGateway(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("gateway", flag.ContinueOnError)
+func agentCmd(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("agent", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
 	cfg := gateway.NewConfigFromFlags(fs)
+	port := fs.Int("port", 18080, "local tunnel endpoint port (localhost:{port})")
 
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
@@ -28,6 +29,9 @@ func runGateway(ctx context.Context, args []string) error {
 	if err := gateway.PostProcessConfig(cfg, fs); err != nil {
 		return fmt.Errorf("postprocess config: %w", err)
 	}
+
+	cfg.ProxyHost = "localhost"
+	cfg.ProxyPort = *port
 
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("validate config: %w", err)
