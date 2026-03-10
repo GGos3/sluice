@@ -1,6 +1,6 @@
 # sluice
 
-**SSH 연결만 가능하면 인터넷을 사용할 수 있습니다.**
+**제한된 환경에서도 SSH 연결만 가능하면 인터넷을 사용할 수 있습니다.**
 
 방화벽으로 인터넷이 차단된 서버에서 SSH 터널을 통해 프록시 서버에 연결하면 외부 인터넷에 접근할 수 있습니다. HTTPS 트래픽은 TLS로 종단 간 암호화(E2E)되어 프록시 서버를 포함한 어떤 중간 노드도 통신 내용을 열람할 수 없으며, SSH 터널을 사용하면 방화벽에서 접속 대상조차 확인할 수 없습니다.
 
@@ -171,11 +171,7 @@ docker run --rm -e SLUICE_PROXY_HOST=192.168.1.100 -e SLUICE_PROXY_USER=user1 -e
 docker run -d --name sluice-gw --net=host --cap-add=NET_ADMIN --cap-add=NET_RAW -e SLUICE_MODE=gateway -e SLUICE_PROXY_HOST=192.168.1.100 ghcr.io/ggos3/sluice
 ```
 
-특정 도메인만 프록시하려면 `SLUICE_PROXY_DOMAINS`를 지정합니다:
-
-```bash
-docker run -d --name sluice-gw --net=host --cap-add=NET_ADMIN --cap-add=NET_RAW -e SLUICE_MODE=gateway -e SLUICE_PROXY_HOST=192.168.1.100 -e SLUICE_PROXY_DOMAINS="github.com,*.github.com,pypi.org" ghcr.io/ggos3/sluice
-```
+Docker 게이트웨이(레거시 iptables/redsocks 방식)는 `SLUICE_PROXY_DOMAINS` 환경변수를 통해 선택적 도메인 라우팅을 지원합니다. 소스 빌드 CLI 게이트웨이는 현재 `--domains` 플래그를 지원하지 않습니다(명시적 오류 반환).
 
 정지:
 
@@ -212,12 +208,42 @@ docker compose down                    # 정지
 | `SLUICE_PROXY_PORT` | 프록시 서버 포트 | `8080` |
 | `SLUICE_PROXY_USER` | 프록시 인증 사용자 | - |
 | `SLUICE_PROXY_PASS` | 프록시 인증 비밀번호 | - |
-| `SLUICE_PROXY_DOMAINS` | 프록시할 도메인 목록 (콤마 구분, 게이트웨이 모드) | - |
+| `SLUICE_PROXY_DOMAINS` | Docker 게이트웨이 선택적 도메인 라우팅 (쉼표分隔 도메인列表) | - |
 | `SLUICE_REDIRECT_PORTS` | 리다이렉트 포트 모드 (게이트웨이 모드) | `http` |
 | `SLUICE_NO_PROXY` | 프록시 제외 대상 | `localhost,127.0.0.1,...` |
 | `SLUICE_CONFIG` | 서버 모드 설정 파일 경로 | `/etc/sluice/config.yaml` |
 
-## 바이너리 빌드
+## 설치
+
+### 원라인 설치
+
+Go 없이 사전 빌드된 바이너리를 설치합니다. Linux와 macOS (amd64/arm64)를 지원합니다.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash
+```
+
+특정 버전을 설치하려면:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- --version v1.0.0
+```
+
+설치 경로: `/usr/local/bin/sluice`, 설정 디렉터리: `/etc/sluice/`
+
+### 제거
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- --uninstall
+```
+
+설정 파일까지 완전히 제거하려면:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- --uninstall --purge
+```
+
+### 소스에서 빌드
 
 Go 1.24 이상이 필요합니다.
 
@@ -233,9 +259,51 @@ make cross-build
 
 ## 바이너리 실행
 
+### 서버 모드
+
+프록시 서버를 직접 실행합니다:
+
 ```bash
-./bin/sluice -config configs/config.yaml
+./bin/sluice-cli server -config configs/config.yaml
 ```
+
+설정 파일이 없으면 기본값으로 자동 생성됩니다:
+
+```bash
+./bin/sluice-cli server
+```
+
+### Run 모드
+
+프록시 서버를 경유하여 명령어를 실행합니다:
+
+```bash
+# 기본 사용
+./bin/sluice-cli run --proxy-host 192.168.1.100 -- curl https://example.com
+
+# 포트 지정
+./bin/sluice-cli run --proxy-host 192.168.1.100 --proxy-port 8080 -- curl https://example.com
+
+# 인증 포함
+./bin/sluice-cli run --proxy-host 192.168.1.100 --proxy-user user1 --proxy-pass secret -- curl https://example.com
+
+# 인터랙티브 셸
+./bin/sluice-cli run --proxy-host 192.168.1.100
+```
+
+### 게이트웨이 모드
+
+호스트 전체 트래픽을 투명 프록시로 라우팅합니다 (루트 권한 필요):
+
+```bash
+# 기본 사용
+sudo ./bin/sluice-cli gateway --proxy-host 192.168.1.100
+
+```
+
+> **참고:** 게이트웨이 모드는 Linux에서만 동작합니다. 비-Linux 환경에서는 오류가 반환됩니다.
+
+`--domains` 플래그를 전달하면 현재는 명시적으로 오류를 반환합니다. 선택적 도메인 라우팅은 별도 구현이 필요합니다.
 
 ## 설정
 
@@ -355,7 +423,7 @@ sudo ./scripts/setup-client.sh --proxy-host 192.168.1.100 --install --dry-run
 sluice/
 ├── cmd/
 │   ├── proxy/main.go              # 서버 진입점 (기존)
-│   └── sluice/main.go             # 서브커맨드 진입점 (server, gateway)
+│   └── sluice/main.go             # 서브커맨드 진입점 (server, run, gateway, version)
 ├── internal/
 │   ├── config/                    # YAML 설정 로딩 및 검증
 │   ├── acl/                       # 도메인 화이트리스트 엔진
