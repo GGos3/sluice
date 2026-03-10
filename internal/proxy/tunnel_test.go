@@ -1,13 +1,13 @@
 package proxy
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"bytes"
 	"strings"
 	"testing"
 	"time"
@@ -237,19 +237,18 @@ func readStatusLine(t *testing.T, conn net.Conn) string {
 	}
 	defer func() { _ = conn.SetReadDeadline(time.Time{}) }()
 
-	reader := bufio.NewReader(conn)
-	statusLine, err := reader.ReadString('\n')
-	if err != nil {
-		t.Fatalf("read status line: %v", err)
-	}
+	var header bytes.Buffer
+	one := make([]byte, 1)
 	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			t.Fatalf("read header line: %v", err)
+		if _, err := conn.Read(one); err != nil {
+			t.Fatalf("read connect response: %v", err)
 		}
-		if line == "\r\n" {
+		header.WriteByte(one[0])
+		if bytes.HasSuffix(header.Bytes(), []byte("\r\n\r\n")) {
 			break
 		}
 	}
+
+	statusLine, _, _ := strings.Cut(header.String(), "\r\n")
 	return strings.TrimSpace(statusLine)
 }
