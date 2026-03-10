@@ -13,11 +13,23 @@ import (
 )
 
 const (
-	sluiceRouteTable   = 100
-	sluiceRulePriority = 10010
-	sluiceMark         = 0x1
+	sluiceRouteTable   = defaultRouteTable
+	sluiceRulePriority = defaultRulePriority
+	sluiceMark         = defaultFwmark
 	sluiceTUNAddress   = "10.0.85.1/24"
 )
+
+type routePolicy struct {
+	routeTable   int
+	rulePriority int
+	fwmark       int
+}
+
+var defaultRoutePolicy = routePolicy{
+	routeTable:   sluiceRouteTable,
+	rulePriority: sluiceRulePriority,
+	fwmark:       sluiceMark,
+}
 
 type netlinkAPI interface {
 	LinkByName(name string) (netlink.Link, error)
@@ -76,10 +88,22 @@ func (systemNetlink) RuleDel(rule *netlink.Rule) error {
 
 type RouteManager struct {
 	netlink netlinkAPI
+	policy  routePolicy
 }
 
 func NewRouteManager() *RouteManager {
-	return &RouteManager{netlink: systemNetlink{}}
+	return &RouteManager{netlink: systemNetlink{}, policy: defaultRoutePolicy}
+}
+
+func NewRouteManagerWithPolicy(routeTable, rulePriority, fwmark int) *RouteManager {
+	return &RouteManager{
+		netlink: systemNetlink{},
+		policy: routePolicy{
+			routeTable:   routeTable,
+			rulePriority: rulePriority,
+			fwmark:       fwmark,
+		},
+	}
 }
 
 func (m *RouteManager) Reconcile() error {
@@ -124,7 +148,7 @@ func (m *RouteManager) Setup(tunName string, proxyIP net.IP) error {
 	}
 
 	defaultRoute := &netlink.Route{
-		Table:     sluiceRouteTable,
+		Table:     m.policyValues().routeTable,
 		LinkIndex: tun.Attrs().Index,
 	}
 
@@ -136,7 +160,7 @@ func (m *RouteManager) Setup(tunName string, proxyIP net.IP) error {
 		return fmt.Errorf("install default route: %w", err)
 	}
 
-	rule := ownedRule()
+	rule := m.ownedRule()
 	if err := m.handle().RuleAdd(rule); err != nil {
 		return fmt.Errorf("install policy rule: %w", err)
 	}
@@ -180,7 +204,7 @@ func (m *RouteManager) buildProxyBypassRoute(proxyIP net.IP) (*netlink.Route, er
 	}
 
 	return &netlink.Route{
-		Table:     sluiceRouteTable,
+		Table:     m.policyValues().routeTable,
 		Dst:       hostRoute(proxyIP),
 		LinkIndex: selected.LinkIndex,
 		Gw:        cloneIP(selected.Gw),
@@ -191,7 +215,7 @@ func (m *RouteManager) buildProxyBypassRoute(proxyIP net.IP) (*netlink.Route, er
 }
 
 func (m *RouteManager) deleteOwnedRoutes() error {
-	routes, err := m.handle().RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{Table: sluiceRouteTable}, netlink.RT_FILTER_TABLE)
+	routes, err := m.handle().RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{Table: m.policyValues().routeTable}, netlink.RT_FILTER_TABLE)
 	if err != nil {
 		return err
 	}
@@ -214,7 +238,7 @@ func (m *RouteManager) deleteOwnedRules() error {
 
 	for i := range rules {
 		rule := rules[i]
-		if !isOwnedRule(rule) {
+		if !m.isOwnedRule(rule) {
 			continue
 		}
 
@@ -234,23 +258,44 @@ func (m *RouteManager) handle() netlinkAPI {
 	return systemNetlink{}
 }
 
-func ownedRule() *netlink.Rule {
+func (m *RouteManager) policyValues() routePolicy {
+	if m == nil {
+		return defaultRoutePolicy
+	}
+	if m.policy.routeTable == 0 && m.policy.rulePriority == 0 && m.policy.fwmark == 0 {
+		return defaultRoutePolicy
+	}
+
+	return m.policy
+}
+
+func (m *RouteManager) ownedRule() *netlink.Rule {
+	policy := m.policyValues()
 	rule := netlink.NewRule()
 	rule.Family = netlink.FAMILY_V4
-	rule.Table = sluiceRouteTable
-	rule.Priority = sluiceRulePriority
-	rule.Mark = sluiceMark
-	mask := uint32(sluiceMark)
+	rule.Table = policy.routeTable
+	rule.Priority = policy.rulePriority
+	rule.Mark = uint32(policy.fwmark)
+	mask := uint32(policy.fwmark)
 	rule.Mask = &mask
 	return rule
 }
 
-func isOwnedRule(rule netlink.Rule) bool {
+func (m *RouteManager) isOwnedRule(rule netlink.Rule) bool {
+	policy := m.policyValues()
 	return rule.Family == netlink.FAMILY_V4 &&
-		rule.Table == sluiceRouteTable &&
-		rule.Priority == sluiceRulePriority &&
-		rule.Mark == sluiceMark &&
-		rule.Mask != nil && *rule.Mask == sluiceMark
+		rule.Table == policy.routeTable &&
+		rule.Priority == policy.rulePriority &&
+		rule.Mark == uint32(policy.fwmark) &&
+		rule.Mask != nil && *rule.Mask == uint32(policy.fwmark)
+}
+
+func ownedRule() *netlink.Rule {
+	return (&RouteManager{policy: defaultRoutePolicy}).ownedRule()
+}
+
+func isOwnedRule(rule netlink.Rule) bool {
+	return (&RouteManager{policy: defaultRoutePolicy}).isOwnedRule(rule)
 }
 
 func hostRoute(ip net.IP) *net.IPNet {

@@ -113,6 +113,9 @@ func (d *ProxyDialer) ForwardHTTPS(ctx context.Context, conn net.Conn, dst netip
 func (d *ProxyDialer) rewriteRequest(req *http.Request, dst netip.AddrPort, host string) (*http.Request, error) {
 	targetHost := host
 	if targetHost == "" {
+		targetHost = req.Host
+	}
+	if targetHost == "" {
 		targetHost = dst.String()
 	}
 

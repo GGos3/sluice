@@ -171,6 +171,87 @@ func TestRouteManagerSetupRequiresProxyRoute(t *testing.T) {
 	}
 }
 
+func TestRouteManagerSetupUsesConfiguredPolicy(t *testing.T) {
+	t.Parallel()
+
+	const (
+		routeTable   = 201
+		rulePriority = 22222
+		fwmark       = 0x9
+	)
+
+	fwmarkMask := uint32(fwmark)
+	customOwnedRule := netlink.Rule{
+		Family:   netlink.FAMILY_V4,
+		Table:    routeTable,
+		Priority: rulePriority,
+		Mark:     fwmark,
+		Mask:     &fwmarkMask,
+	}
+
+	fake := &fakeNetlink{
+		links: map[string]netlink.Link{
+			"sluice0": &netlink.Device{LinkAttrs: netlink.LinkAttrs{Name: "sluice0", Index: 42}},
+		},
+		routeGetRoutes: []netlink.Route{{
+			LinkIndex: 7,
+			Gw:        net.ParseIP("192.0.2.1").To4(),
+		}},
+		routes: []netlink.Route{
+			{Table: routeTable, LinkIndex: 5},
+			{Table: sluiceRouteTable, LinkIndex: 99},
+		},
+		rules: []netlink.Rule{customOwnedRule, ownedRuleValue()},
+	}
+
+	mgr := NewRouteManagerWithPolicy(routeTable, rulePriority, fwmark)
+	mgr.netlink = fake
+
+	if err := mgr.Setup("sluice0", net.ParseIP("198.51.100.10")); err != nil {
+		t.Fatalf("Setup() error = %v", err)
+	}
+
+	if got, want := len(fake.deletedRoutes), 1; got != want {
+		t.Fatalf("deletedRoutes = %d, want %d", got, want)
+	}
+	if got, want := fake.deletedRoutes[0].Table, routeTable; got != want {
+		t.Fatalf("deletedRoutes[0].Table = %d, want %d", got, want)
+	}
+
+	if got, want := len(fake.deletedRules), 1; got != want {
+		t.Fatalf("deletedRules = %d, want %d", got, want)
+	}
+	if got, want := fake.deletedRules[0].Table, routeTable; got != want {
+		t.Fatalf("deletedRules[0].Table = %d, want %d", got, want)
+	}
+
+	if got, want := len(fake.replacedRoutes), 2; got != want {
+		t.Fatalf("replacedRoutes = %d, want %d", got, want)
+	}
+	for i, replaced := range fake.replacedRoutes {
+		if got, want := replaced.Table, routeTable; got != want {
+			t.Fatalf("replacedRoutes[%d].Table = %d, want %d", i, got, want)
+		}
+	}
+
+	if got, want := len(fake.addedRules), 1; got != want {
+		t.Fatalf("addedRules = %d, want %d", got, want)
+	}
+	addedRule := fake.addedRules[0]
+	if got, want := addedRule.Table, routeTable; got != want {
+		t.Fatalf("addedRule.Table = %d, want %d", got, want)
+	}
+	if got, want := addedRule.Priority, rulePriority; got != want {
+		t.Fatalf("addedRule.Priority = %d, want %d", got, want)
+	}
+	if got, want := addedRule.Mark, uint32(fwmark); got != want {
+		t.Fatalf("addedRule.Mark = %d, want %d", got, want)
+	}
+	if addedRule.Mask == nil || *addedRule.Mask != uint32(fwmark) {
+		t.Fatalf("addedRule.Mask = %#v, want %d", addedRule.Mask, fwmark)
+	}
+}
+
 type fakeNetlink struct {
 	links                map[string]netlink.Link
 	addrAddErr           error

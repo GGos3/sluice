@@ -668,12 +668,14 @@ func TestForwardHTTPSFallbacksWithoutSNI(t *testing.T) {
 				_ = tcpConn.CloseWrite()
 			}
 
-			_ = clientConn.Close()
-			<-serverDone
-			if err := <-serverErr; err != nil {
-				t.Fatalf("ForwardHTTPS() error = %v", err)
-			}
-			if proxyState.err != nil {
+	_ = clientConn.Close()
+	<-serverDone
+	if err := <-serverErr; err != nil {
+		t.Fatalf("ForwardHTTPS() error = %v", err)
+	}
+	// Wait for mock proxy goroutine to finish before reading shared state
+	proxyDone()
+	if proxyState.err != nil {
 				t.Fatalf("mock proxy error = %v", proxyState.err)
 			}
 			if proxyState.connectTarget != tt.wantTarget {
