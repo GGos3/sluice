@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -42,8 +43,10 @@ func run(ctx context.Context) error {
 	switch args[0] {
 	case "server":
 		return serverCmd(ctx, args[1:])
+	case "run":
+		return runCmd(ctx, args[1:])
 	case "gateway":
-		return gatewayCmd(ctx, args[1:])
+		return runGateway(ctx, args[1:])
 	case "version":
 		return versionCmd()
 	default:
@@ -57,7 +60,8 @@ func printUsage() {
 
 Commands:
   server    Start the proxy server
-  gateway   Run as transparent proxy gateway (not yet implemented)
+  run       Run a command with proxy environment variables
+  gateway   Run as transparent proxy gateway (Linux only)
   version   Show version information
 
 Run 'sluice <command> -h' for more information on a command.
@@ -67,6 +71,69 @@ Run 'sluice <command> -h' for more information on a command.
 func versionCmd() error {
 	fmt.Printf("sluice %s (built %s)\n", version, buildTime)
 	return nil
+}
+
+func runCmd(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	proxyHost := fs.String("proxy-host", "", "proxy server host (required)")
+	proxyPort := fs.String("proxy-port", "8080", "proxy server port")
+	proxyUser := fs.String("proxy-user", "", "proxy authentication username")
+	proxyPass := fs.String("proxy-pass", "", "proxy authentication password")
+	noProxy := fs.String("no-proxy", "localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16", "comma-separated list of hosts to bypass proxy")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if *proxyHost == "" {
+		return fmt.Errorf("--proxy-host is required")
+	}
+
+	authPart := ""
+	if *proxyUser != "" {
+		authPart = *proxyUser
+		if *proxyPass != "" {
+			authPart = authPart + ":" + *proxyPass
+		}
+		authPart = authPart + "@"
+	}
+
+	proxyURL := fmt.Sprintf("http://%s%s:%s", authPart, *proxyHost, *proxyPort)
+
+	os.Setenv("HTTP_PROXY", proxyURL)
+	os.Setenv("HTTPS_PROXY", proxyURL)
+	os.Setenv("NO_PROXY", *noProxy)
+	os.Setenv("http_proxy", proxyURL)
+	os.Setenv("https_proxy", proxyURL)
+	os.Setenv("no_proxy", *noProxy)
+
+	remaining := fs.Args()
+
+	var shellPath string
+	var argv []string
+	if len(remaining) == 0 {
+		shell := os.Getenv("SHELL")
+		if shell == "" {
+			shell = "sh"
+		}
+		var err error
+		shellPath, err = exec.LookPath(shell)
+		if err != nil {
+			return fmt.Errorf("shell not found: %s", shell)
+		}
+		argv = []string{shellPath}
+	} else {
+		var err error
+		shellPath, err = exec.LookPath(remaining[0])
+		if err != nil {
+			return fmt.Errorf("command not found: %s", remaining[0])
+		}
+		argv = append([]string{shellPath}, remaining[1:]...)
+	}
+
+	err := syscall.Exec(shellPath, argv, os.Environ())
+	return fmt.Errorf("exec failed: %w", err)
 }
 
 func serverCmd(ctx context.Context, args []string) error {
@@ -141,39 +208,5 @@ func serverCmd(ctx context.Context, args []string) error {
 	}
 
 	log.Info("proxy server stopped")
-	return nil
-}
-
-func gatewayCmd(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("gateway", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	proxyHost := fs.String("proxy-host", "", "proxy server host (required)")
-	proxyPort := fs.String("proxy-port", "8080", "proxy server port")
-	proxyUser := fs.String("proxy-user", "", "proxy authentication username")
-	proxyPass := fs.String("proxy-pass", "", "proxy authentication password")
-	domains := fs.String("domains", "", "comma-separated list of domains to proxy (empty for all)")
-	logLevel := fs.String("log-level", "info", "logging level (debug, info, warn, error)")
-	logFormat := fs.String("log-format", "json", "log format (json, text)")
-
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	if *proxyHost == "" {
-		fmt.Println("Gateway mode is not yet implemented.")
-		fmt.Println("Use 'sluice server' to start the proxy server.")
-		return nil
-	}
-
-	_ = proxyPort
-	_ = proxyUser
-	_ = proxyPass
-	_ = domains
-	_ = logLevel
-	_ = logFormat
-	_ = ctx
-
-	fmt.Println("Gateway mode is not yet implemented.")
-	fmt.Println("Use 'sluice server' to start the proxy server.")
 	return nil
 }
