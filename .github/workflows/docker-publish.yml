@@ -11,7 +11,7 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
@@ -26,6 +26,39 @@ jobs:
 
       - name: Run tests
         run: go test -v -race -count=1 ./...
+
+  build-release:
+    needs: test
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Cross build
+        run: make cross-build VERSION=${{ github.event.release.tag_name }}
+
+      - name: Create checksums
+        run: |
+          cd bin
+          sha256sum sluice-* > ../sluice-checksums.txt
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ github.event.release.tag_name }} \
+            bin/sluice-linux-amd64 \
+            bin/sluice-linux-arm64 \
+            bin/sluice-darwin-amd64 \
+            bin/sluice-darwin-arm64 \
+            sluice-checksums.txt \
+            --clobber
 
   build-and-push:
     needs: test
