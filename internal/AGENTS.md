@@ -1,15 +1,19 @@
 # INTERNAL PACKAGE GUIDE
 
 ## OVERVIEW
-`internal/` holds all private application logic; each subpackage owns one narrow concern and is wired together only from `cmd/proxy/main.go`.
+`internal/` holds all private application logic; each subpackage owns one narrow concern and is wired together only from `cmd/sluice/main.go`.
 
 ## STRUCTURE
 ```text
 internal/
-├── acl/      # whitelist rule parsing and host matching
+├── acl/      # server-side whitelist matching
 ├── config/   # config schema, defaults, validation
+├── dns/      # DoH (DNS-over-HTTPS) server
+├── gateway/  # TUN/netstack intercept logic (agent)
 ├── logger/   # slog setup and access log formatting
-└── proxy/    # HTTP proxying and CONNECT tunnels
+├── proxy/    # HTTP forwarding and CONNECT tunnels
+├── rules/    # client-side proxy exclusion rules
+└── tunnel/   # SSH reverse tunnel management
 ```
 
 ## WHERE TO LOOK
@@ -20,6 +24,10 @@ internal/
 | Logging field change | `logger/logger.go` | Keep `proxy` group field names stable |
 | Request flow/auth/header handling | `proxy/handler.go` | Main HTTP code path |
 | CONNECT tunnel behavior | `proxy/tunnel.go` | Socket hijack + relay logic |
+| SSH tunnel lifecycle | `tunnel/tunnel.go` | Reverse tunnel management |
+| Agent interception | `gateway/gateway.go` | TUN device and netstack integration |
+| Exclusion rules | `rules/rules.go` | CIDR and domain-based bypass logic |
+
 
 ## CONVENTIONS
 - Keep packages independent; `proxy` is the integration point that depends on `acl` and `logger`.
@@ -28,7 +36,7 @@ internal/
 - Nil handling is deliberate in several APIs (`Whitelist`, logger access path); preserve those call contracts.
 
 ## ANTI-PATTERNS
-- Do not create cross-package shortcuts that bypass `config.Load`, `acl.New`, or `logger.Setup`; `main.go` is the composition root.
+- Do not create cross-package shortcuts that bypass `config.Load`, `acl.New`, or `logger.Setup`; `cmd/sluice/main.go` is the composition root.
 - Do not split reusable helpers into a new shared package unless more than one internal package genuinely needs them; current layout is intentionally compact.
 - Do not add broad package-level state; current packages are mostly constructor-driven and request-scoped.
 

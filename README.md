@@ -1,457 +1,178 @@
 # sluice
 
-**제한된 환경에서도 SSH 연결만 가능하면 인터넷을 사용할 수 있습니다.**
+**SSH 포트 하나만으로, 방화벽에 막힌 서버에서 인터넷을 쓸 수 있게 합니다.**
 
-방화벽으로 인터넷이 차단된 서버에서 SSH 터널을 통해 프록시 서버에 연결하면 외부 인터넷에 접근할 수 있습니다. HTTPS 트래픽은 TLS로 종단 간 암호화(E2E)되어 프록시 서버를 포함한 어떤 중간 노드도 통신 내용을 열람할 수 없으며, SSH 터널을 사용하면 방화벽에서 접속 대상조차 확인할 수 없습니다.
+방화벽으로 인터넷이 차단된 서버에서도 외부로 나가는 SSH(TCP 22) 연결만 가능하면 `sluice`를 통해 자유롭게 인터넷을 사용할 수 있습니다. `sluice`는 프록시 서버에서 SSH 리버스 터널(-R)을 자동으로 생성하고, 클라이언트(agent)는 모든 HTTP, HTTPS, DNS 트래픽을 가로채어 이 터널로 전송합니다.
 
-```
+```text
 ┌──────────────────┐          ┌──────────────────┐          ┌──────────────┐
-│  차단된 서버      │──────────│  프록시 서버      │──────────│  인터넷       │
-│                  │  SSH     │  (sluice server) │  HTTPS:  │              │
-│  curl, git,      │  터널    │  :18080           │  E2E     │  github.com  │
-│  npm, pip ...    │ (암호화)  │                  │  TLS     │  pypi.org    │
+│  막힌 서버        │──────────│  프록시 서버      │──────────│  인터넷       │
+│  (Client/Agent)  │  SSH     │  (Server)        │  HTTPS:  │              │
+│                  │  터널    │                  │  E2E     │  github.com  │
+│  curl, git,      │  (-R)    │  sluice server   │  TLS     │  pypi.org    │
+│  apt, dnf ...    │ (암호화)  │                  │          │  google.com  │
 └──────────────────┘          └──────────────────┘          └──────────────┘
        └────── 방화벽은 SSH 연결만 확인 가능, 통신 내용 열람 불가 ──────┘
 ```
 
 ## 주요 기능
 
-- **SSH 터널만으로 인터넷 접근** — SSH(TCP 22)만 열려 있으면 외부 인터넷 사용 가능, 추가 포트 개방 불필요
-- **종단 간 암호화 (E2E)** — HTTPS 트래픽은 TLS로 E2E 암호화되어 프록시 서버도 통신 내용 열람 불가
-- **HTTP / HTTPS 프록싱** — 일반 HTTP 요청 포워딩 및 CONNECT 메서드를 통한 HTTPS 터널링
-- **도메인 화이트리스트** — `*.github.com` 같은 와일드카드 패턴 지원, 미등록 도메인은 자동 차단 (default-deny)
-- **접근 로그** — JSON 구조화 로그로 소스 IP, 도메인, 상태 코드, 전송 바이트, 응답 시간 기록
-- **선택적 인증** — Proxy-Authorization 기반 Basic Auth 지원
-- **게이트웨이 모드** — 순수 Go TUN/netstack 기반 투명 프록시, 외부 바이너리(iptables, redsocks) 의존 없음 (개발 중)
-- **Docker 지원** — server / run / gateway 모드 컨테이너로 간편 배포
-- **단일 바이너리** — Go로 작성되어 의존성 없이 배포 가능, 크로스 컴파일 지원
+- **SSH 리버스 터널링** — 별도의 포트 개방 없이 SSH(22) 포트 하나만으로 모든 트래픽 중계
+- **투명 프록시 (Agent)** — 애플리케이션 설정 변경 없이 모든 트래픽(80, 443, 53)을 자동으로 가로채기
+- **DNS-over-HTTPS (DoH)** — DNS 질의를 프록시 포트(18080)를 통해 암호화하여 전송, DNS 유출 차단
+- **클라이언트 제외 규칙** — 사설 IP 대역(10.0.0.0/8 등)이나 특정 도메인은 프록시를 거치지 않도록 설정 가능
+- **서버 화이트리스트** — 허용된 도메인만 접속할 수 있게 제한 (Default-Deny ACL)
+- **구조화된 접근 로그** — 접속한 도메인, 상태 코드, 전송량 등을 JSON 형태로 기록
+- **Docker 지원** — `server`와 `agent` 각각 최적화된 Docker 이미지 제공
+- **단일 바이너리** — Go로 작성되어 의존성 없이 즉시 실행 가능
 
-## 보안
+## 보안 및 아키텍처
 
-### 종단 간 암호화 (E2E Encryption)
-
-sluice를 통한 HTTPS 트래픽은 이중으로 암호화됩니다:
+`sluice`는 SSH의 강력한 암호화를 활용합니다. 방화벽 입장에서는 서버가 외부 프록시 서버와 SSH 연결을 유지하고 있는 것으로만 보이며, 그 안에서 어떤 사이트(github.com, google.com 등)에 접속하는지 알 수 없습니다.
 
 | 구간 | 암호화 방식 | 설명 |
 |------|-------------|------|
-| 차단된 서버 ↔ 프록시 서버 | **SSH 터널** | 방화벽이 트래픽 내용 및 접속 대상을 볼 수 없음 |
-| 차단된 서버 ↔ 목적지 서버 | **TLS (E2E)** | 프록시 서버도 HTTPS 통신 내용을 볼 수 없음 |
+| 막힌 서버 ↔ 프록시 서버 | **SSH 터널** | 방화벽이 트래픽 내용 및 접속 대상을 볼 수 없음 |
+| 막힌 서버 ↔ 목적지 서버 | **TLS (E2E)** | 프록시 서버도 HTTPS 통신 내용을 볼 수 없음 |
 
-프록시 서버는 HTTPS 요청 시 CONNECT 터널을 생성하고 암호화된 바이트를 그대로 중계합니다. 통신 내용을 복호화하거나 열람하지 않습니다.
-
-> **로드맵:** 순수 Go 구현의 내장 E2E 암호화를 통해 SSH 터널 없이도 게이트웨이-서버 간 암호화 통신을 지원할 예정입니다.
-
-### 네트워크 요구 사항
-
-sluice는 최소한의 네트워크 연결만 필요합니다:
-
-| 구간 | 프로토콜 | 포트 | 용도 |
-|------|----------|------|------|
-| 차단된 서버 → 프록시 서버 | TCP (SSH) | **22** | SSH 터널 (권장) |
-| 차단된 서버 → 프록시 서버 | TCP | **18080** | 직접 연결 (SSH 불필요 시) |
-| 프록시 서버 → 인터넷 | TCP | 80, 443 | HTTP/HTTPS 대상 서버 |
-
-**SSH 터널을 사용하면 차단된 서버에서 TCP 22번 포트만 열려 있으면 됩니다.** 프록시 포트(18080)는 SSH 터널을 통해 localhost로 접근하므로 별도로 개방할 필요가 없습니다.
+> **참고:** `agent` 모드는 Linux 전용입니다. TUN 디바이스와 netstack을 사용하여 트래픽을 가로챕니다.
 
 ## 빠른 시작
 
-sluice는 세 가지 모드로 동작합니다:
+### 1. 프록시 서버 시작 (내 로컬 PC 또는 외부 서버)
 
-| 모드 | 용도 | 필요한 것 |
-|------|------|-----------|
-| **server** | 프록시 서버 실행 | 없음 (설정 자동 생성) |
-| **run** | 프록시 경유로 명령어 실행 | 서버 주소 (`SLUICE_PROXY_HOST`) |
-| **gateway** | 호스트 전체 트래픽 투명 프록시 | 서버 주소 + 루트 권한 |
-
-### 서버 모드
-
-프록시 서버를 실행합니다. HTTP 요청은 직접 포워딩하고, HTTPS 요청은 CONNECT 터널링으로 처리합니다. 설정 파일이 없으면 기본값(화이트리스트 비활성, 인증 비활성)으로 자동 생성됩니다.
-
-#### Docker
+프록시 서버에서 아래 명령을 실행하면 프록시 서비스를 시작하고, 동시에 막힌 서버에 SSH로 접속하여 리버스 터널을 생성합니다.
 
 ```bash
-docker run -d --name sluice -e SLUICE_MODE=server -p 18080:18080 ghcr.io/ggos3/sluice
+# user@remote-host는 방화벽에 막힌 서버의 SSH 주소입니다.
+./sluice server --tunnel user@remote-host
 ```
 
-커스텀 설정 파일을 사용하려면 `-v` 옵션으로 마운트합니다:
+### 2. 에이전트 시작 (막힌 서버)
+
+막힌 서버에서 루트 권한으로 에이전트를 실행합니다. 이제 이 서버의 모든 인터넷 트래픽은 자동으로 프록시를 경유합니다.
 
 ```bash
-docker run -d --name sluice -e SLUICE_MODE=server -p 18080:18080 -v ./config.yaml:/etc/sluice/config.yaml:ro ghcr.io/ggos3/sluice
+sudo ./sluice agent
 ```
 
-정지 및 삭제:
+### 3. 확인
+
+이제 아무 명령어나 실행해 보세요.
 
 ```bash
-docker stop sluice && docker rm sluice
-```
-
-#### Docker Compose
-
-```yaml
-services:
-  sluice-server:
-    image: ghcr.io/ggos3/sluice
-    environment:
-      SLUICE_MODE: server
-    ports:
-      - "18080:18080"
-```
-
-```bash
-docker compose up -d sluice-server    # 실행
-docker compose down                   # 정지
-```
-
-### SSH 터널로 프록시 사용
-
-차단된 서버에서 프록시 서버로 직접 연결이 불가능한 경우, SSH 터널을 통해 접근합니다. SSH 연결만 가능하면 모든 인터넷 트래픽을 프록시로 경유할 수 있습니다.
-
-```bash
-# 1. SSH 터널 생성 (로컬 18080 → 프록시 서버 18080)
-ssh -L 18080:localhost:18080 user@proxy-server -N &
-
-# 2. 프록시 환경 변수 설정
-export HTTP_PROXY=http://localhost:18080
-export HTTPS_PROXY=http://localhost:18080
-
-# 3. 인터넷 사용 — 모든 트래픽이 SSH 터널을 통해 암호화
 curl https://github.com
-git clone https://github.com/user/repo
-pip install requests
-npm install
+git clone https://github.com/example/repo.git
 ```
 
-`scripts/setup-client.sh`를 사용하면 SSH 터널과 프록시 환경 변수를 자동으로 설정할 수 있습니다:
+## Docker 사용법
+
+### 서버 (Server)
 
 ```bash
-sudo ./scripts/setup-client.sh \
-  --proxy-host proxy-server \
-  --ssh-tunnel \
-  --ssh-user myuser \
-  --install
+docker run -d --name sluice-server \
+  -v ~/.ssh:/root/.ssh:ro \
+  ghcr.io/ggos3/sluice-server \
+  server --tunnel user@remote-host
 ```
 
-### Run 모드
+### 에이전트 (Agent)
 
-프록시 서버를 경유하여 명령어를 실행합니다. 컨테이너는 명령 완료 후 자동으로 제거됩니다.
+에이전트는 네트워크 트래픽을 가로채기 위해 `--net=host`와 `NET_ADMIN` 권한이 필요합니다.
 
 ```bash
-docker run --rm -e SLUICE_PROXY_HOST=192.168.1.100 ghcr.io/ggos3/sluice curl https://example.com
-
-docker run --rm -e SLUICE_PROXY_HOST=192.168.1.100 ghcr.io/ggos3/sluice wget https://example.com/file.tar.gz
-
-docker run --rm -e SLUICE_PROXY_HOST=192.168.1.100 ghcr.io/ggos3/sluice git clone https://github.com/user/repo
-
-docker run --rm -e SLUICE_PROXY_HOST=192.168.1.100 ghcr.io/ggos3/sluice npm install
+docker run -d --name sluice-agent \
+  --net=host \
+  --cap-add=NET_ADMIN \
+  ghcr.io/ggos3/sluice-agent
 ```
 
-인터랙티브 셸 (프록시 환경변수가 자동 설정된 셸):
+## 상세 설정
 
-```bash
-docker run -it --rm -e SLUICE_PROXY_HOST=192.168.1.100 ghcr.io/ggos3/sluice
-```
+### 서버 설정 (`configs/config.yaml`)
 
-프록시 인증이 필요한 경우:
-
-```bash
-docker run --rm -e SLUICE_PROXY_HOST=192.168.1.100 -e SLUICE_PROXY_USER=user1 -e SLUICE_PROXY_PASS=secret ghcr.io/ggos3/sluice curl https://example.com
-```
-
-### 게이트웨이 모드
-
-호스트의 모든 아웃바운드 HTTP/HTTPS 트래픽을 투명하게 가로채어 프록시 서버로 라우팅합니다. 애플리케이션에 프록시 설정을 하지 않아도 모든 트래픽이 자동으로 프록시를 경유합니다.
-
-> **참고:** 게이트웨이 모드는 순수 Go TUN/netstack 기반으로 재구현 중입니다. iptables, redsocks 등 외부 바이너리 의존이 제거되며, 향후 내장 E2E 암호화를 지원할 예정입니다.
-
-**주의:** `--net=host`와 `NET_ADMIN`, `NET_RAW` 권한이 필요합니다.
-
-#### Docker
-
-```bash
-docker run -d --name sluice-gw --net=host --cap-add=NET_ADMIN --cap-add=NET_RAW -e SLUICE_MODE=gateway -e SLUICE_PROXY_HOST=192.168.1.100 ghcr.io/ggos3/sluice
-```
-
-Docker 게이트웨이(레거시 iptables/redsocks 방식)는 `SLUICE_PROXY_DOMAINS` 환경변수를 통해 선택적 도메인 라우팅을 지원합니다. 소스 빌드 CLI 게이트웨이는 현재 `--domains` 플래그를 지원하지 않습니다(명시적 오류 반환).
-
-정지:
-
-```bash
-docker stop sluice-gw && docker rm sluice-gw
-```
-
-#### Docker Compose
-
-```yaml
-services:
-  sluice-gateway:
-    image: ghcr.io/ggos3/sluice
-    environment:
-      SLUICE_MODE: gateway
-      SLUICE_PROXY_HOST: 192.168.1.100
-    network_mode: host
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-```
-
-```bash
-docker compose up -d sluice-gateway    # 실행
-docker compose down                    # 정지
-```
-
-### 환경 변수
-
-| 변수 | 설명 | 기본값 |
-|---|---|---|
-| `SLUICE_MODE` | `server`, `run`, 또는 `gateway` | `run` |
-| `SLUICE_PROXY_HOST` | 프록시 서버 주소 (run/gateway 모드 필수) | - |
-| `SLUICE_PROXY_PORT` | 프록시 서버 포트 | `18080` |
-| `SLUICE_PROXY_USER` | 프록시 인증 사용자 | - |
-| `SLUICE_PROXY_PASS` | 프록시 인증 비밀번호 | - |
-| `SLUICE_PROXY_DOMAINS` | Docker 게이트웨이 선택적 도메인 라우팅 | - |
-| `SLUICE_REDIRECT_PORTS` | 리다이렉트 포트 모드 (게이트웨이 모드) | `http` |
-| `SLUICE_NO_PROXY` | 프록시 제외 대상 | `localhost,127.0.0.1,...` |
-| `SLUICE_CONFIG` | 서버 모드 설정 파일 경로 | `/etc/sluice/config.yaml` |
-
-## 설치
-
-### 원라인 설치
-
-Go 없이 사전 빌드된 바이너리를 설치합니다. Linux와 macOS (amd64/arm64)를 지원합니다.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash
-```
-
-특정 버전을 설치하려면:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- --version v1.0.0
-```
-
-설치 경로: `/usr/local/bin/sluice`, 설정 디렉터리: `/etc/sluice/`
-
-### 제거
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- --uninstall
-```
-
-설정 파일까지 완전히 제거하려면:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- --uninstall --purge
-```
-
-### 소스에서 빌드
-
-Go 1.24 이상이 필요합니다.
-
-```bash
-make build
-```
-
-크로스 컴파일 (linux/darwin, amd64/arm64):
-
-```bash
-make cross-build
-```
-
-## 바이너리 실행
-
-### 서버 모드
-
-프록시 서버를 직접 실행합니다:
-
-```bash
-./bin/sluice-cli server -config configs/config.yaml
-```
-
-설정 파일이 없으면 기본값으로 자동 생성됩니다:
-
-```bash
-./bin/sluice-cli server
-```
-
-### Run 모드
-
-프록시 서버를 경유하여 명령어를 실행합니다:
-
-```bash
-# 기본 사용
-./bin/sluice-cli run --proxy-host 192.168.1.100 -- curl https://example.com
-
-# 포트 지정
-./bin/sluice-cli run --proxy-host 192.168.1.100 --proxy-port 18080 -- curl https://example.com
-
-# 인증 포함
-./bin/sluice-cli run --proxy-host 192.168.1.100 --proxy-user user1 --proxy-pass secret -- curl https://example.com
-
-# 인터랙티브 셸
-./bin/sluice-cli run --proxy-host 192.168.1.100
-```
-
-### 게이트웨이 모드
-
-호스트 전체 트래픽을 투명 프록시로 라우팅합니다 (루트 권한 필요):
-
-```bash
-# 기본 사용
-sudo ./bin/sluice-cli gateway --proxy-host 192.168.1.100
-
-```
-
-> **참고:** 게이트웨이 모드는 Linux에서만 동작합니다. 비-Linux 환경에서는 오류가 반환됩니다.
-
-`--domains` 플래그를 전달하면 현재는 명시적으로 오류를 반환합니다. 선택적 도메인 라우팅은 별도 구현이 필요합니다.
-
-## 설정
-
-설정 파일 없이 서버를 시작하면 기본값으로 설정 파일이 자동 생성됩니다 (Docker: `/etc/sluice/config.yaml`, 바이너리: `configs/config.yaml`). 도메인 화이트리스트나 인증이 필요한 경우 `configs/config.yaml`을 참고하여 커스텀 설정 파일을 작성합니다.
+서버는 화이트리스트를 통해 접속 가능한 도메인을 제한할 수 있습니다.
 
 ```yaml
 server:
-  host: "0.0.0.0"
   port: 18080
-  read_timeout: 30
-  write_timeout: 30
-  idle_timeout: 120
-
 whitelist:
   enabled: true
   domains:
     - "github.com"
     - "*.github.com"
-    - "*.githubusercontent.com"
-    - "go.dev"
-    - "*.golang.org"
-    - "proxy.golang.org"
-    - "registry.npmjs.org"
     - "pypi.org"
-    - "*.pypi.org"
-
-logging:
-  level: "info"        # debug, info, warn, error
-  format: "json"       # json, text
-  access_log: "stdout" # stdout, stderr, 또는 파일 경로
-
 auth:
   enabled: false
-  credentials:
-    - username: "user1"
-      password: "changeme"
 ```
 
-### 화이트리스트 규칙
+### 에이전트 제외 규칙 (`--no-proxy`)
 
-| 패턴 | 매칭 대상 | 비매칭 대상 |
-|---|---|---|
-| `github.com` | `github.com` | `api.github.com` |
-| `*.github.com` | `api.github.com`, `raw.github.com` | `github.com` (apex 미매칭) |
-
-apex 도메인과 서브도메인 모두 허용하려면 두 항목을 함께 등록합니다:
-
-```yaml
-domains:
-  - "github.com"
-  - "*.github.com"
-```
-
-## 클라이언트 설정
-
-Docker 대신 직접 설정할 경우 `scripts/setup-client.sh`를 사용합니다.
-
-### 직접 연결
+내부 망 통신 등 프록시를 거치지 않아야 할 대상은 `--no-proxy` 플래그로 지정합니다. 도메인(와일드카드 지원)과 IP 대역(CIDR)을 혼합해서 쓸 수 있습니다.
 
 ```bash
-sudo ./scripts/setup-client.sh --proxy-host 192.168.1.100 --proxy-port 18080 --install
+# 기본값으로 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16은 제외됩니다.
+sudo ./sluice agent --no-proxy "*.internal.corp,172.20.0.0/16"
 ```
 
-### SSH 터널
+## 수동 SSH 터널링 (선택 사항)
+
+`sluice server --tunnel`을 사용하는 대신 직접 SSH 터널을 뚫고 싶다면 다음과 같이 합니다:
+
+1. 프록시 서버 실행: `sluice server --port 18080` (직접 리슨)
+2. 터널 생성: `ssh -R 18080:localhost:18080 user@remote-host -N`
+3. 에이전트 실행: `sudo sluice agent --port 18080`
+
+## 실행 모드 요약
+
+| 모드 | 용도 | 권한 |
+|------|------|------|
+| `server` | 프록시 서비스 및 SSH 터널 관리 | 일반 유저 |
+| `agent` | 시스템 전체 트래픽 투명 가로채기 | **Root (Linux)** |
+| `run` | 특정 명령어만 프록시 경유 (환경변수 방식) | 일반 유저 |
+
+### Run 모드 사용법
+
+시스템 전체를 가로채지 않고 특정 명령어만 프록시를 쓰게 하고 싶을 때 유용합니다. (Agent 실행 불필요, SSH 터널은 필요)
 
 ```bash
-sudo ./scripts/setup-client.sh \
-  --proxy-host 192.168.1.100 \
-  --proxy-port 18080 \
-  --ssh-tunnel \
-  --ssh-user myuser \
-  --install
+# 프록시 서버가 localhost:18080에 터널링되어 있다고 가정
+./sluice run -- curl https://example.com
 ```
 
-### 상태 확인 / 제거
+## 접근 로그 (Access Log)
 
-```bash
-sudo ./scripts/setup-client.sh --status
-sudo ./scripts/setup-client.sh --uninstall
-sudo ./scripts/setup-client.sh --proxy-host 192.168.1.100 --install --dry-run
-```
-
-## 접근 로그
-
-모든 요청은 구조화된 JSON으로 기록됩니다.
+프록시 서버는 모든 요청을 JSON 구조화 로그로 남깁니다.
 
 ```json
 {
-  "time": "2026-03-09T10:15:32Z",
+  "time": "2026-03-10T10:15:32Z",
   "level": "INFO",
   "msg": "access",
   "proxy": {
-    "source_ip": "192.168.1.50",
+    "source_ip": "127.0.0.1",
     "method": "CONNECT",
-    "domain": "api.github.com:443",
+    "domain": "github.com:443",
     "status": 200,
-    "bytes_in": 0,
-    "bytes_out": 15234,
-    "duration_ms": 45,
+    "bytes_in": 1240,
+    "bytes_out": 5620,
+    "duration_ms": 150,
     "allowed": true,
     "reason": "ok"
   }
 }
 ```
 
-| reason | 의미 |
-|---|---|
-| `ok` | 정상 처리 |
-| `domain_not_allowed` | 화이트리스트에 없는 도메인 |
-| `proxy_auth_required` | 인증 필요 또는 실패 |
-| `target_dial_failed` | 대상 서버 연결 실패 |
-| `upstream_roundtrip_failed` | 업스트림 요청 실패 |
-
 ## 프로젝트 구조
 
-```
-sluice/
-├── cmd/
-│   ├── proxy/main.go              # 서버 진입점 (기존)
-│   └── sluice/main.go             # 서브커맨드 진입점 (server, run, gateway, version)
-├── internal/
-│   ├── config/                    # YAML 설정 로딩 및 검증
-│   ├── acl/                       # 도메인 화이트리스트 엔진
-│   ├── logger/                    # slog 기반 구조화 접근 로깅
-│   ├── proxy/
-│   │   ├── handler.go             # HTTP 포워딩, 인증, 헤더 처리
-│   │   └── tunnel.go              # HTTPS CONNECT 터널링
-│   └── gateway/                   # 순수 Go 투명 프록시 (개발 중)
-│       ├── tun.go                 # Linux TUN 디바이스 관리
-│       ├── stack.go               # gVisor netstack TCP/IP 스택
-│       ├── proxy.go               # HTTP/HTTPS 프록시 포워딩
-│       ├── sni.go                 # TLS ClientHello SNI 추출
-│       ├── route.go               # netlink 라우팅 관리
-│       └── config.go              # 게이트웨이 설정 및 검증
-├── configs/config.yaml            # 예제 설정 파일
-├── scripts/setup-client.sh        # 클라이언트 설정 스크립트
-├── Dockerfile                     # 멀티 스테이지 Docker 이미지
-├── docker-entrypoint.sh           # server/run/gateway 모드 엔트리포인트
-├── docker-compose.yml             # Compose 예제
-└── Makefile
-```
+- `cmd/sluice/`: CLI 엔트리포인트 (server, agent, run)
+- `internal/proxy/`: HTTP/HTTPS 프록시 핸들러 및 터널링
+- `internal/tunnel/`: SSH 리버스 터널 매니저
+- `internal/dns/`: DoH(DNS-over-HTTPS) 서버 구현
+- `internal/gateway/`: TUN/netstack 기반 트래픽 인터셉터 (Agent 코어)
+- `internal/rules/`: 클라이언트 제외 규칙 엔진
+- `internal/acl/`: 서버 측 도메인 화이트리스트
 
-## 테스트
-
-```bash
-make test
-```
-
-## License
+## 라이선스
 
 MIT

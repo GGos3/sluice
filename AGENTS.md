@@ -5,21 +5,23 @@
 **Branch:** main
 
 ## OVERVIEW
-`sluice` is a single-binary Go forward proxy for firewalled environments. Core concerns: whitelist enforcement, optional proxy auth, structured access logging, Docker server/run/gateway operation.
+`sluice` is a single-binary Go forward proxy for firewalled environments. Core concerns: whitelist enforcement, SSH reverse tunneling, transparent intercept (agent), and structured access logging.
 
 ## STRUCTURE
 ```text
 sluice/
-├── cmd/proxy/          # binary entrypoint, flag parsing, graceful shutdown
+├── cmd/sluice/         # binary entrypoint (server, agent, run commands)
 ├── internal/           # private application packages
-│   ├── acl/            # whitelist matching and host normalization
+│   ├── acl/            # server-side whitelist matching
 │   ├── config/         # YAML load/default/validation path
+│   ├── dns/            # DoH (DNS-over-HTTPS) server
+│   ├── gateway/        # TUN/netstack intercept logic (agent)
 │   ├── logger/         # slog setup + access log shaping
-│   └── proxy/          # HTTP forwarding and CONNECT tunneling
+│   ├── proxy/          # HTTP forwarding and CONNECT tunneling
+│   ├── rules/          # client-side proxy exclusion rules
+│   └── tunnel/         # SSH reverse tunnel management
 ├── configs/            # sample runtime config
-├── scripts/            # host-side client setup helpers
-├── docker-entrypoint.sh
-├── Dockerfile
+├── Dockerfile          # multi-stage build for server/agent
 ├── docker-compose.yml
 └── Makefile
 ```
@@ -27,26 +29,30 @@ sluice/
 ## WHERE TO LOOK
 | Task | Location | Notes |
 |------|----------|-------|
-| Start the server | `cmd/proxy/main.go` | Builds `bin/sluice`, wires config/logger/auth/handler |
+| Start the server | `cmd/sluice/main.go` | Subcommand entrypoint for server/agent/run |
 | Change request handling | `internal/proxy/handler.go` | Plain HTTP proxy path, header stripping, auth gating |
 | Change CONNECT tunneling | `internal/proxy/tunnel.go` | HTTPS tunnel handshake and bidirectional copy |
 | Change whitelist behavior | `internal/acl/whitelist.go` | Wildcard and host normalization rules |
-| Change config schema/validation | `internal/config/config.go` | Defaults first, strict validation after normalize |
+| Change SSH tunneling | `internal/tunnel/tunnel.go` | Reverse tunnel management and reconnection |
+| Change agent intercept | `internal/gateway/gateway.go` | TUN device and netstack integration |
+| Change DNS handling | `internal/dns/server.go` | DoH server implementation |
 | Change access logs | `internal/logger/logger.go` | `slog` setup and `proxy` log group shape |
 | Change example runtime settings | `configs/config.yaml` | Sample domains and logging/auth defaults |
 | Change dev workflow | `Makefile` | Canonical build/test/fmt/cross-build targets |
 | Change CI/CD pipeline | `.github/workflows/docker-publish.yml` | Test → multi-platform build → GHCR push |
-| Change run/gateway shell flow | `scripts/setup-client.sh`, `docker-entrypoint.sh` | Root/system tool requirements live here |
 
 ## CODE MAP
 | Unit | Kind | Location | Role |
 |------|------|----------|------|
-| `main`, `run` | entrypoint | `cmd/proxy/main.go` | Parse flags, boot server, graceful shutdown |
+| `main`, `run` | entrypoint | `cmd/sluice/main.go` | Parse flags, dispatch subcommands |
 | `NewHandler`, `ServeHTTP` | core API | `internal/proxy/handler.go` | Dispatch HTTP vs CONNECT, enforce auth + ACL |
 | `handleConnect`, `bidirectionalCopy` | tunnel path | `internal/proxy/tunnel.go` | Hijack connection and relay bytes |
 | `Load`, `Config.Address` | config API | `internal/config/config.go` | Read YAML, normalize, default, validate |
 | `New`, `Whitelist.IsAllowed` | ACL API | `internal/acl/whitelist.go` | Default-deny domain filtering |
 | `Setup`, `LogAccess` | logging API | `internal/logger/logger.go` | Build `slog` logger and structured access logs |
+| `ReverseTunnel` | tunnel API | `internal/tunnel/tunnel.go` | SSH reverse tunnel lifecycle |
+| `NewGateway` | agent API | `internal/gateway/gateway.go` | TUN-based traffic capture |
+
 
 ## CONVENTIONS
 - Keep application code under `internal/`; this repo does not use `pkg/`.
@@ -82,4 +88,3 @@ make cross-build
 - Tooling in this environment may lack `go`; if verification fails due to missing toolchain, treat that as environment-specific rather than repo breakage.
 - CI runs via `.github/workflows/docker-publish.yml`: tests on every push, multi-platform Docker build + GHCR push on `main` (`:dev` tag) and on release (semver tags + `:latest`).
 - Docker mode names are operationally important: `server`, `run`, `gateway`.
-- `docker-entrypoint.sh` rejects missing `SLUICE_PROXY_HOST` in run/gateway mode and downgrades unsupported `SLUICE_REDIRECT_PORTS=all`.
