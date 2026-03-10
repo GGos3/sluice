@@ -123,7 +123,7 @@ func (s *Stack) listenTCP(addr netip.AddrPort) (net.Listener, error) {
 	return gonet.NewTCPListener(s.stack, &wq, ep), nil
 }
 
-func (s *Stack) serveTCP(addr netip.AddrPort, handler TCPHandler) (net.Listener, error) {
+func (s *Stack) ServeTCP(addr netip.AddrPort, handler TCPHandler) (net.Listener, error) {
 	if handler == nil {
 		return nil, errors.New("tcp handler is required")
 	}
@@ -141,6 +141,10 @@ func (s *Stack) serveTCP(addr netip.AddrPort, handler TCPHandler) (net.Listener,
 		}
 	}()
 	return listener, nil
+}
+
+func (s *Stack) serveTCP(addr netip.AddrPort, handler TCPHandler) (net.Listener, error) {
+	return s.ServeTCP(addr, handler)
 }
 
 func (s *Stack) debugCounts() (rx, tx int64) {
