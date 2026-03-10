@@ -26,6 +26,31 @@
 - 클라이언트 제외 규칙 (`--no-proxy`, 도메인/CIDR)
 - 구조화된 접근 로그
 
+## 설치 (원샷)
+
+한 줄 명령으로 `sluice` 바이너리를 설치할 수 있습니다:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash
+```
+
+설치 후 동일한 `sluice` 바이너리로 서버/에이전트를 실행합니다:
+
+```bash
+sluice server --tunnel user@remote-host --ssh-port 220
+sudo sluice agent --port 18080
+```
+
+설치 스크립트 옵션 예시:
+
+```bash
+# 특정 릴리스 버전 설치
+curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- --version v0.1.0
+
+# 제거
+curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- --uninstall
+```
+
 ## 빠른 시작
 
 ### 1) 프록시 서버 + 리버스 터널 시작

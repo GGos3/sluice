@@ -26,6 +26,31 @@ The agent intercepts HTTP/HTTPS/DNS traffic and forwards it through an SSH rever
 - Client-side exclusion rules (`--no-proxy` with domains/CIDRs)
 - Structured access logs
 
+## Install (one-shot)
+
+Install the `sluice` binary with a single command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash
+```
+
+After installation, use the same `sluice` binary for both modes:
+
+```bash
+sluice server --tunnel user@remote-host --ssh-port 220
+sudo sluice agent --port 18080
+```
+
+Optional installer flags:
+
+```bash
+# install a specific release tag
+curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- --version v0.1.0
+
+# uninstall
+curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- --uninstall
+```
+
 ## Quick start
 
 ### 1) Start proxy server + reverse tunnel
