@@ -199,14 +199,21 @@ func TestTUNDeviceMTUDefault(t *testing.T) {
 func TestMain(m *testing.M) {
 	if os.Getuid() != 0 {
 		if _, err := exec.LookPath("unshare"); err == nil {
-			cmd := exec.Command("unshare", "--user", "--map-root-user", os.Args[0], "-test.run=^Test")
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			cmd.Env = append(os.Environ(), "GATEWAY_TEST_UNPRIVILEGED=1")
-			if err := cmd.Run(); err != nil {
-				os.Exit(1)
+			// Probe whether user namespaces are functional in this
+			// environment. Some CI runners (e.g. GitHub Actions) have
+			// unshare installed but block user-namespace creation.
+			probe := exec.Command("unshare", "--user", "--map-root-user", "true")
+			if probe.Run() == nil {
+				cmd := exec.Command("unshare", "--user", "--map-root-user", os.Args[0], "-test.run=^Test")
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				cmd.Env = append(os.Environ(), "GATEWAY_TEST_UNPRIVILEGED=1")
+				if err := cmd.Run(); err != nil {
+					os.Exit(1)
+				}
+				os.Exit(0)
 			}
-			os.Exit(0)
+			// User namespace unavailable; tests that need root will skip.
 		}
 	}
 	os.Exit(m.Run())
