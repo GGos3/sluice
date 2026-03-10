@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"flag"
+	"os"
 	"strings"
 	"testing"
 )
@@ -15,7 +16,20 @@ func TestConfigValidate(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "valid config with all defaults except ProxyHost",
+			name: "valid config with all defaults",
+			cfg: &Config{
+				ProxyPort:    18080,
+				LogLevel:     "info",
+				LogFormat:    "json",
+				TUNName:      "sluice0",
+				RouteTable:   100,
+				RulePriority: 10010,
+				Fwmark:       0x1,
+			},
+			wantErr: "",
+		},
+		{
+			name: "valid config with proxy host",
 			cfg: &Config{
 				ProxyHost:    "127.0.0.1",
 				ProxyPort:    18080,
@@ -41,36 +55,40 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: "",
 		},
 		{
-			name: "valid config with domains",
+			name: "valid config with no-proxy fields",
 			cfg: &Config{
-				ProxyHost: "10.0.0.1",
-				ProxyPort: 8080,
-				Domains:   []string{"github.com", "*.github.com"},
-				LogLevel:  "warn",
-				LogFormat: "json",
+				ProxyHost:       "10.0.0.1",
+				ProxyPort:       8080,
+				NoProxyDomains:  []string{"github.com", "*.github.com"},
+				NoProxyIPRanges: []string{"10.0.0.0/8", "192.168.0.0/16"},
+				LogLevel:        "warn",
+				LogFormat:       "json",
 			},
 			wantErr: "",
 		},
 		{
-			name: "empty proxy host",
+			name: "empty proxy host is allowed for agent mode",
 			cfg: &Config{
 				ProxyHost: "",
 				ProxyPort: 8080,
+				LogLevel:  defaultLogLevel,
+				LogFormat: defaultLogFormat,
 			},
-			wantErr: "proxy host is required",
+			wantErr: "",
 		},
 		{
-			name: "whitespace proxy host",
+			name: "whitespace proxy host is allowed for agent mode",
 			cfg: &Config{
 				ProxyHost: "   ",
 				ProxyPort: 8080,
+				LogLevel:  defaultLogLevel,
+				LogFormat: defaultLogFormat,
 			},
-			wantErr: "proxy host is required",
+			wantErr: "",
 		},
 		{
 			name: "port too low",
 			cfg: &Config{
-				ProxyHost: "127.0.0.1",
 				ProxyPort: 0,
 				LogLevel:  defaultLogLevel,
 				LogFormat: defaultLogFormat,
@@ -80,7 +98,6 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name: "port too high",
 			cfg: &Config{
-				ProxyHost: "127.0.0.1",
 				ProxyPort: 70000,
 				LogLevel:  defaultLogLevel,
 				LogFormat: defaultLogFormat,
@@ -90,7 +107,6 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name: "invalid log level",
 			cfg: &Config{
-				ProxyHost: "127.0.0.1",
 				ProxyPort: 8080,
 				LogLevel:  "trace",
 				LogFormat: defaultLogFormat,
@@ -100,7 +116,6 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name: "invalid log format",
 			cfg: &Config{
-				ProxyHost: "127.0.0.1",
 				ProxyPort: 8080,
 				LogLevel:  defaultLogLevel,
 				LogFormat: "yaml",
@@ -110,7 +125,6 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name: "port at minimum boundary",
 			cfg: &Config{
-				ProxyHost: "127.0.0.1",
 				ProxyPort: 1,
 				LogLevel:  defaultLogLevel,
 				LogFormat: defaultLogFormat,
@@ -120,7 +134,6 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name: "port at maximum boundary",
 			cfg: &Config{
-				ProxyHost: "127.0.0.1",
 				ProxyPort: 65535,
 				LogLevel:  defaultLogLevel,
 				LogFormat: defaultLogFormat,
@@ -178,8 +191,8 @@ func TestConfigDefault(t *testing.T) {
 		t.Fatalf("Fwmark = %d, want %d", cfg.Fwmark, defaultFwmark)
 	}
 
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("Default() config should fail validation (ProxyHost is required)")
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Default() config should pass validation, got error: %v", err)
 	}
 }
 
@@ -232,17 +245,18 @@ func TestConfigProxyAddress(t *testing.T) {
 func TestConfigNormalize(t *testing.T) {
 	t.Parallel()
 
-	t.Run("normalizes domain list", func(t *testing.T) {
+	t.Run("normalizes no-proxy domain list", func(t *testing.T) {
 		t.Parallel()
 
 		cfg := &Config{
-			ProxyHost: "  127.0.0.1  ",
-			ProxyUser: "  user  ",
-			ProxyPass: "  pass  ",
-			LogLevel:  "  DEBUG  ",
-			LogFormat: "  JSON  ",
-			TUNName:   "  sluice0  ",
-			Domains:   []string{"  GITHUB.COM  ", "  *.Example.com  "},
+			ProxyHost:       "  127.0.0.1  ",
+			ProxyUser:       "  user  ",
+			ProxyPass:       "  pass  ",
+			LogLevel:        "  DEBUG  ",
+			LogFormat:       "  JSON  ",
+			TUNName:         "  sluice0  ",
+			NoProxyDomains:  []string{"  GITHUB.COM  ", "  *.Example.com  "},
+			NoProxyIPRanges: []string{"  10.0.0.0/8  "},
 		}
 
 		cfg.normalize()
@@ -265,8 +279,11 @@ func TestConfigNormalize(t *testing.T) {
 		if cfg.TUNName != "sluice0" {
 			t.Fatalf("TUNName = %q, want %q", cfg.TUNName, "sluice0")
 		}
-		if len(cfg.Domains) != 2 || cfg.Domains[0] != "github.com" || cfg.Domains[1] != "*.example.com" {
-			t.Fatalf("Domains = %v, want [github.com *.example.com]", cfg.Domains)
+		if len(cfg.NoProxyDomains) != 2 || cfg.NoProxyDomains[0] != "github.com" || cfg.NoProxyDomains[1] != "*.example.com" {
+			t.Fatalf("NoProxyDomains = %v, want [github.com *.example.com]", cfg.NoProxyDomains)
+		}
+		if len(cfg.NoProxyIPRanges) != 1 || cfg.NoProxyIPRanges[0] != "10.0.0.0/8" {
+			t.Fatalf("NoProxyIPRanges = %v, want [10.0.0.0/8]", cfg.NoProxyIPRanges)
 		}
 	})
 }
@@ -282,8 +299,8 @@ func TestNewConfigFromFlags(t *testing.T) {
 
 		expectedFlags := []string{
 			"proxy-host", "proxy-port", "proxy-user", "proxy-pass",
-			"domains", "log-level", "log-format", "tun-name",
-			"route-table", "rule-priority", "fwmark",
+			"no-proxy", "log-level", "log-format", "tun-name",
+			"route-table", "rule-priority", "fwmark", "config",
 		}
 
 		for _, name := range expectedFlags {
@@ -303,22 +320,334 @@ func TestNewConfigFromFlags(t *testing.T) {
 		}
 	})
 
-	t.Run("domains flag parses comma-separated values", func(t *testing.T) {
+	t.Run("no-proxy flag parses mixed CIDR and domain values", func(t *testing.T) {
 		t.Parallel()
 
 		fs := flag.NewFlagSet("test", flag.ContinueOnError)
 		cfg := NewConfigFromFlags(fs)
 
-		err := fs.Set("domains", "github.com,*.github.com,pypi.org")
+		err := fs.Set("no-proxy", "10.0.0.0/8,*.internal.com,192.168.0.0/16,api.example.com")
 		if err != nil {
 			t.Fatalf("Set() error = %v", err)
 		}
 
-		if len(cfg.Domains) != 3 {
-			t.Fatalf("Domains length = %d, want 3", len(cfg.Domains))
+		err = PostProcessConfig(cfg, fs)
+		if err != nil {
+			t.Fatalf("PostProcessConfig() error = %v", err)
 		}
-		if cfg.Domains[0] != "github.com" || cfg.Domains[1] != "*.github.com" || cfg.Domains[2] != "pypi.org" {
-			t.Fatalf("Domains = %v, want [github.com *.github.com pypi.org]", cfg.Domains)
+
+		if len(cfg.NoProxyIPRanges) != 2 {
+			t.Fatalf("NoProxyIPRanges length = %d, want 2", len(cfg.NoProxyIPRanges))
+		}
+		if cfg.NoProxyIPRanges[0] != "10.0.0.0/8" {
+			t.Fatalf("NoProxyIPRanges[0] = %q, want 10.0.0.0/8", cfg.NoProxyIPRanges[0])
+		}
+		if cfg.NoProxyIPRanges[1] != "192.168.0.0/16" {
+			t.Fatalf("NoProxyIPRanges[1] = %q, want 192.168.0.0/16", cfg.NoProxyIPRanges[1])
+		}
+
+		if len(cfg.NoProxyDomains) != 2 {
+			t.Fatalf("NoProxyDomains length = %d, want 2", len(cfg.NoProxyDomains))
+		}
+		if cfg.NoProxyDomains[0] != "*.internal.com" {
+			t.Fatalf("NoProxyDomains[0] = %q, want *.internal.com", cfg.NoProxyDomains[0])
+		}
+		if cfg.NoProxyDomains[1] != "api.example.com" {
+			t.Fatalf("NoProxyDomains[1] = %q, want api.example.com", cfg.NoProxyDomains[1])
+		}
+	})
+}
+
+func TestLoadYAMLConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("loads YAML config file", func(t *testing.T) {
+		t.Parallel()
+
+		content := `
+proxy_host: "192.168.1.100"
+proxy_port: 3128
+proxy_user: "user1"
+proxy_pass: "secret"
+no_proxy_domains:
+  - "*.internal.com"
+  - "localhost"
+no_proxy_ip_ranges:
+  - "10.0.0.0/8"
+  - "172.16.0.0/12"
+log_level: "debug"
+log_format: "text"
+tun_name: "sluice1"
+route_table: 200
+rule_priority: 10020
+fwmark: 0x2
+`
+		tmpFile, err := os.CreateTemp("", "sluice-config-*.yaml")
+		if err != nil {
+			t.Fatalf("CreateTemp() error = %v", err)
+		}
+		defer os.Remove(tmpFile.Name())
+
+		if _, err := tmpFile.WriteString(content); err != nil {
+			t.Fatalf("WriteString() error = %v", err)
+		}
+		tmpFile.Close()
+
+		cfg := Default()
+		if err := loadYAMLConfig(tmpFile.Name(), cfg); err != nil {
+			t.Fatalf("loadYAMLConfig() error = %v", err)
+		}
+
+		if cfg.ProxyHost != "192.168.1.100" {
+			t.Fatalf("ProxyHost = %q, want %q", cfg.ProxyHost, "192.168.1.100")
+		}
+		if cfg.ProxyPort != 3128 {
+			t.Fatalf("ProxyPort = %d, want %d", cfg.ProxyPort, 3128)
+		}
+		if cfg.ProxyUser != "user1" {
+			t.Fatalf("ProxyUser = %q, want %q", cfg.ProxyUser, "user1")
+		}
+		if cfg.ProxyPass != "secret" {
+			t.Fatalf("ProxyPass = %q, want %q", cfg.ProxyPass, "secret")
+		}
+		if len(cfg.NoProxyDomains) != 2 {
+			t.Fatalf("NoProxyDomains length = %d, want 2", len(cfg.NoProxyDomains))
+		}
+		if cfg.NoProxyDomains[0] != "*.internal.com" {
+			t.Fatalf("NoProxyDomains[0] = %q, want %q", cfg.NoProxyDomains[0], "*.internal.com")
+		}
+		if len(cfg.NoProxyIPRanges) != 2 {
+			t.Fatalf("NoProxyIPRanges length = %d, want 2", len(cfg.NoProxyIPRanges))
+		}
+		if cfg.NoProxyIPRanges[0] != "10.0.0.0/8" {
+			t.Fatalf("NoProxyIPRanges[0] = %q, want %q", cfg.NoProxyIPRanges[0], "10.0.0.0/8")
+		}
+		if cfg.LogLevel != "debug" {
+			t.Fatalf("LogLevel = %q, want %q", cfg.LogLevel, "debug")
+		}
+		if cfg.LogFormat != "text" {
+			t.Fatalf("LogFormat = %q, want %q", cfg.LogFormat, "text")
+		}
+		if cfg.TUNName != "sluice1" {
+			t.Fatalf("TUNName = %q, want %q", cfg.TUNName, "sluice1")
+		}
+	})
+
+	t.Run("handles missing config file", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := Default()
+		err := loadYAMLConfig("/nonexistent/path/config.yaml", cfg)
+		if err == nil {
+			t.Fatal("loadYAMLConfig() expected error for missing file")
+		}
+		if !strings.Contains(err.Error(), "read config") {
+			t.Fatalf("Error = %q, want substring 'read config'", err.Error())
+		}
+	})
+
+	t.Run("handles invalid YAML", func(t *testing.T) {
+		t.Parallel()
+
+		tmpFile, err := os.CreateTemp("", "sluice-config-*.yaml")
+		if err != nil {
+			t.Fatalf("CreateTemp() error = %v", err)
+		}
+		defer os.Remove(tmpFile.Name())
+
+		if _, err := tmpFile.WriteString("invalid: yaml: content: ["); err != nil {
+			t.Fatalf("WriteString() error = %v", err)
+		}
+		tmpFile.Close()
+
+		cfg := Default()
+		err = loadYAMLConfig(tmpFile.Name(), cfg)
+		if err == nil {
+			t.Fatal("loadYAMLConfig() expected error for invalid YAML")
+		}
+		if !strings.Contains(err.Error(), "parse config") {
+			t.Fatalf("Error = %q, want substring 'parse config'", err.Error())
+		}
+	})
+
+	t.Run("merges YAML config with existing values", func(t *testing.T) {
+		t.Parallel()
+
+		content := `
+proxy_host: "192.168.1.100"
+no_proxy_domains:
+  - "*.internal.com"
+`
+		tmpFile, err := os.CreateTemp("", "sluice-config-*.yaml")
+		if err != nil {
+			t.Fatalf("CreateTemp() error = %v", err)
+		}
+		defer os.Remove(tmpFile.Name())
+
+		if _, err := tmpFile.WriteString(content); err != nil {
+			t.Fatalf("WriteString() error = %v", err)
+		}
+		tmpFile.Close()
+
+		cfg := &Config{
+			ProxyHost:      "10.0.0.1",
+			ProxyPort:      8080,
+			NoProxyDomains: []string{"localhost"},
+		}
+
+		if err := loadYAMLConfig(tmpFile.Name(), cfg); err != nil {
+			t.Fatalf("loadYAMLConfig() error = %v", err)
+		}
+
+		if cfg.ProxyHost != "192.168.1.100" {
+			t.Fatalf("ProxyHost = %q, want %q", cfg.ProxyHost, "192.168.1.100")
+		}
+		if cfg.ProxyPort != 8080 {
+			t.Fatalf("ProxyPort = %d, want %d (should not be overwritten)", cfg.ProxyPort, 8080)
+		}
+		if len(cfg.NoProxyDomains) != 2 {
+			t.Fatalf("NoProxyDomains length = %d, want 2 (merged)", len(cfg.NoProxyDomains))
+		}
+	})
+}
+
+func TestPostProcessConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("processes --config flag after parse", func(t *testing.T) {
+		t.Parallel()
+
+		content := `
+proxy_host: "192.168.1.100"
+proxy_port: 3128
+no_proxy_domains:
+  - "*.internal.com"
+`
+		tmpFile, err := os.CreateTemp("", "sluice-config-*.yaml")
+		if err != nil {
+			t.Fatalf("CreateTemp() error = %v", err)
+		}
+		defer os.Remove(tmpFile.Name())
+
+		if _, err := tmpFile.WriteString(content); err != nil {
+			t.Fatalf("WriteString() error = %v", err)
+		}
+		tmpFile.Close()
+
+		fs := flag.NewFlagSet("test", flag.ContinueOnError)
+		cfg := NewConfigFromFlags(fs)
+
+		err = fs.Set("config", tmpFile.Name())
+		if err != nil {
+			t.Fatalf("Set() error = %v", err)
+		}
+
+		err = PostProcessConfig(cfg, fs)
+		if err != nil {
+			t.Fatalf("PostProcessConfig() error = %v", err)
+		}
+
+		if cfg.ProxyHost != "192.168.1.100" {
+			t.Fatalf("ProxyHost = %q, want %q", cfg.ProxyHost, "192.168.1.100")
+		}
+		if cfg.ProxyPort != 3128 {
+			t.Fatalf("ProxyPort = %d, want %d", cfg.ProxyPort, 3128)
+		}
+		if len(cfg.NoProxyDomains) != 1 || cfg.NoProxyDomains[0] != "*.internal.com" {
+			t.Fatalf("NoProxyDomains = %v, want [*.internal.com]", cfg.NoProxyDomains)
+		}
+	})
+
+	t.Run("processes --no-proxy flag after parse", func(t *testing.T) {
+		t.Parallel()
+
+		fs := flag.NewFlagSet("test", flag.ContinueOnError)
+		cfg := NewConfigFromFlags(fs)
+
+		err := fs.Set("no-proxy", "10.0.0.0/8,*.internal.com")
+		if err != nil {
+			t.Fatalf("Set() error = %v", err)
+		}
+
+		err = PostProcessConfig(cfg, fs)
+		if err != nil {
+			t.Fatalf("PostProcessConfig() error = %v", err)
+		}
+
+		if len(cfg.NoProxyIPRanges) != 1 || cfg.NoProxyIPRanges[0] != "10.0.0.0/8" {
+			t.Fatalf("NoProxyIPRanges = %v, want [10.0.0.0/8]", cfg.NoProxyIPRanges)
+		}
+		if len(cfg.NoProxyDomains) != 1 || cfg.NoProxyDomains[0] != "*.internal.com" {
+			t.Fatalf("NoProxyDomains = %v, want [*.internal.com]", cfg.NoProxyDomains)
+		}
+	})
+
+	t.Run("returns error for missing config file", func(t *testing.T) {
+		t.Parallel()
+
+		fs := flag.NewFlagSet("test", flag.ContinueOnError)
+		cfg := NewConfigFromFlags(fs)
+
+		err := fs.Set("config", "/nonexistent/path/config.yaml")
+		if err != nil {
+			t.Fatalf("Set() error = %v", err)
+		}
+
+		err = PostProcessConfig(cfg, fs)
+		if err == nil {
+			t.Fatal("PostProcessConfig() expected error for missing file")
+		}
+		if !strings.Contains(err.Error(), "read config") {
+			t.Fatalf("Error = %q, want substring 'read config'", err.Error())
+		}
+	})
+
+	t.Run("handles both config and no-proxy flags", func(t *testing.T) {
+		t.Parallel()
+
+		content := `
+proxy_host: "192.168.1.100"
+no_proxy_domains:
+  - "localhost"
+no_proxy_ip_ranges:
+  - "172.16.0.0/12"
+`
+		tmpFile, err := os.CreateTemp("", "sluice-config-*.yaml")
+		if err != nil {
+			t.Fatalf("CreateTemp() error = %v", err)
+		}
+		defer os.Remove(tmpFile.Name())
+
+		if _, err := tmpFile.WriteString(content); err != nil {
+			t.Fatalf("WriteString() error = %v", err)
+		}
+		tmpFile.Close()
+
+		fs := flag.NewFlagSet("test", flag.ContinueOnError)
+		cfg := NewConfigFromFlags(fs)
+
+		err = fs.Set("config", tmpFile.Name())
+		if err != nil {
+			t.Fatalf("Set() error = %v", err)
+		}
+		err = fs.Set("no-proxy", "10.0.0.0/8,*.example.com")
+		if err != nil {
+			t.Fatalf("Set() error = %v", err)
+		}
+
+		err = PostProcessConfig(cfg, fs)
+		if err != nil {
+			t.Fatalf("PostProcessConfig() error = %v", err)
+		}
+
+		if cfg.ProxyHost != "192.168.1.100" {
+			t.Fatalf("ProxyHost = %q, want %q", cfg.ProxyHost, "192.168.1.100")
+		}
+		if len(cfg.NoProxyIPRanges) != 2 {
+			t.Fatalf("NoProxyIPRanges length = %d, want 2", len(cfg.NoProxyIPRanges))
+		}
+		if len(cfg.NoProxyDomains) != 2 {
+			t.Fatalf("NoProxyDomains length = %d, want 2", len(cfg.NoProxyDomains))
 		}
 	})
 }
