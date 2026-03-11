@@ -53,30 +53,54 @@ curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.s
 curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- uninstall
 ```
 
+## 설치 (수동)
+
+대상 호스트가 GitHub에 직접 접근할 수 없다면, 다른 머신에서 미리 빌드된 릴리스 바이너리를 내려받아 수동으로 옮겨 설치할 수 있습니다.
+
+```bash
+# 인터넷이 되는 머신에서
+curl -fsSL https://github.com/ggos3/sluice/releases/download/v0.1.0/sluice-linux-amd64 -o sluice
+curl -fsSL https://github.com/ggos3/sluice/releases/download/v0.1.0/sluice-checksums.txt -o sluice-checksums.txt
+grep " sluice-linux-amd64$" sluice-checksums.txt | sha256sum -c -
+
+# 방화벽 서버로 바이너리 전송
+scp sluice user@firewalled-host:/tmp/sluice
+
+# 방화벽 서버에서 설치
+ssh user@firewalled-host 'sudo install -m 0755 /tmp/sluice /usr/local/bin/sluice'
+```
+
+설치 후에는 원샷 설치와 동일하게 같은 `sluice` 바이너리를 사용하면 됩니다:
+
+```bash
+sluice server --tunnel user@remote-host --ssh-port 220
+sudo sluice agent --port 18080
+```
+
 ## 빠른 시작
 
 ### 1) 프록시 서버 + 리버스 터널 시작
 
 ```bash
-./sluice server --tunnel user@remote-host
+sluice server --tunnel user@remote-host
 ```
 
 원격 SSH 데몬이 기본 포트(22)가 아닌 포트(예: `220`)를 사용할 경우:
 
 ```bash
-./sluice server --tunnel user@remote-host --ssh-port 220
+sluice server --tunnel user@remote-host --ssh-port 220
 ```
 
 sluice 프록시 포트도 함께 변경할 수 있습니다:
 
 ```bash
-./sluice server --tunnel user@remote-host --ssh-port 220 --port 18080
+sluice server --tunnel user@remote-host --ssh-port 220 --port 18080
 ```
 
 ### 2) 차단된 호스트에서 에이전트 시작 (Linux, root)
 
 ```bash
-sudo ./sluice agent --port 18080
+sudo sluice agent --port 18080
 ```
 
 ### 3) 확인

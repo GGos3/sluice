@@ -53,30 +53,54 @@ curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.s
 curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- uninstall
 ```
 
+## Install (Manual)
+
+If the target host cannot reach GitHub directly, download the prebuilt release binary on another machine and transfer it manually.
+
+```bash
+# on a machine with internet access
+curl -fsSL https://github.com/ggos3/sluice/releases/download/v0.1.0/sluice-linux-amd64 -o sluice
+curl -fsSL https://github.com/ggos3/sluice/releases/download/v0.1.0/sluice-checksums.txt -o sluice-checksums.txt
+grep " sluice-linux-amd64$" sluice-checksums.txt | sha256sum -c -
+
+# transfer the binary to the firewalled host
+scp sluice user@firewalled-host:/tmp/sluice
+
+# install on the firewalled host
+ssh user@firewalled-host 'sudo install -m 0755 /tmp/sluice /usr/local/bin/sluice'
+```
+
+After installation, use the same `sluice` binary as the one-shot installer:
+
+```bash
+sluice server --tunnel user@remote-host --ssh-port 220
+sudo sluice agent --port 18080
+```
+
 ## Quick start
 
 ### 1) Start proxy server + reverse tunnel
 
 ```bash
-./sluice server --tunnel user@remote-host
+sluice server --tunnel user@remote-host
 ```
 
 If the remote SSH daemon uses a non-default port (for example `220`):
 
 ```bash
-./sluice server --tunnel user@remote-host --ssh-port 220
+sluice server --tunnel user@remote-host --ssh-port 220
 ```
 
 You can also change the sluice port:
 
 ```bash
-./sluice server --tunnel user@remote-host --ssh-port 220 --port 18080
+sluice server --tunnel user@remote-host --ssh-port 220 --port 18080
 ```
 
 ### 2) Start agent on the blocked host (Linux, root)
 
 ```bash
-sudo ./sluice agent --port 18080
+sudo sluice agent --port 18080
 ```
 
 ### 3) Verify
