@@ -43,6 +43,8 @@ sudo sluice agent --port 18080
 
 설치 스크립트는 현재 OS/아키텍처에 맞는 GitHub Release 바이너리를 내려받고 체크섬을 검증합니다.
 
+Linux 릴리스 바이너리는 구버전/신버전 배포판 호환성을 높이기 위해 `CGO_ENABLED=0`으로 빌드됩니다.
+
 설치 스크립트 옵션 예시:
 
 ```bash
@@ -75,6 +77,11 @@ CPU 아키텍처에 맞는 바이너리를 선택하세요:
 ```bash
 uname -m
 ```
+
+호환성 참고:
+
+- `linux-amd64`, `linux-arm64` 릴리스 바이너리는 광범위한 배포판 호환성을 위해 cgo 없이(`CGO_ENABLED=0`) 빌드됩니다.
+- Linux agent 모드는 별도로 커널 권한/Capabilities(`NET_ADMIN`, root)가 필요합니다.
 
 ```bash
 # 인터넷이 되는 머신에서

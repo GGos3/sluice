@@ -7,6 +7,7 @@ GOFLAGS := -buildvcs=false
 
 GO ?= go
 GOFLAGS ?=
+CGO_ENABLED ?= 0
 
 # Default target
 .PHONY: all
@@ -54,11 +55,11 @@ cross-build: cross-linux-amd64 cross-linux-arm64 cross-darwin-amd64 cross-darwin
 
 .PHONY: cross-linux-amd64
 cross-linux-amd64:
-	GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) $(LDFLAGS) -o bin/$(BINARY_NAME)-linux-amd64 ./cmd/sluice
+	CGO_ENABLED=$(CGO_ENABLED) GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) $(LDFLAGS) -o bin/$(BINARY_NAME)-linux-amd64 ./cmd/sluice
 
 .PHONY: cross-linux-arm64
 cross-linux-arm64:
-	GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) $(LDFLAGS) -o bin/$(BINARY_NAME)-linux-arm64 ./cmd/sluice
+	CGO_ENABLED=$(CGO_ENABLED) GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) $(LDFLAGS) -o bin/$(BINARY_NAME)-linux-arm64 ./cmd/sluice
 
 .PHONY: cross-darwin-amd64
 cross-darwin-amd64:

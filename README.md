@@ -43,6 +43,8 @@ sudo sluice agent --port 18080
 
 The installer downloads the matching GitHub Release binary for your OS/architecture and verifies its checksum.
 
+Linux release binaries are built with `CGO_ENABLED=0` to maximize compatibility across older/newer distributions.
+
 Optional installer flags:
 
 ```bash
@@ -75,6 +77,11 @@ You can check with:
 ```bash
 uname -m
 ```
+
+Compatibility note:
+
+- `linux-amd64` and `linux-arm64` release binaries are built without cgo (`CGO_ENABLED=0`) for broad distro compatibility.
+- For Linux agent mode, kernel capabilities/permissions are still required (`NET_ADMIN`, root).
 
 ```bash
 # on a machine with internet access
