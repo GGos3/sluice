@@ -27,6 +27,43 @@ jobs:
       - name: Run tests
         run: go test -v -race -count=1 ./...
 
+  e2e:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check E2E prerequisites
+        id: prereq
+        run: |
+          echo "Checking /dev/net/tun..."
+          ls -la /dev/net/tun && echo "tun=true" >> "$GITHUB_OUTPUT" || echo "tun=false" >> "$GITHUB_OUTPUT"
+          echo "Checking kernel modules..."
+          lsmod | grep nf_tables && echo "nft=true" >> "$GITHUB_OUTPUT" || echo "nft=false" >> "$GITHUB_OUTPUT"
+
+      - name: Run E2E tests
+        if: steps.prereq.outputs.tun == 'true'
+        run: make e2e
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          mkdir -p e2e-artifacts
+          docker compose -f e2e/docker-compose.yml logs > e2e-artifacts/compose.log 2>&1 || true
+          docker compose -f e2e/docker-compose.yml ps > e2e-artifacts/compose-ps.log 2>&1 || true
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: e2e-artifacts/
+          retention-days: 7
+
+      - name: Skip notice
+        if: steps.prereq.outputs.tun == 'false'
+        run: echo "::warning::E2E tests skipped — /dev/net/tun not available on this runner"
+
   build-release:
     needs: test
     if: github.event_name == 'release'
