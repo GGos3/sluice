@@ -53,18 +53,41 @@ curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.s
 curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- uninstall
 ```
 
+## 제거 (수동)
+
+수동 설치했거나 설치 스크립트 없이 직접 삭제하려면:
+
+```bash
+sudo rm -f /usr/local/bin/sluice
+```
+
 ## 설치 (수동)
 
 대상 호스트가 GitHub에 직접 접근할 수 없다면, 다른 머신에서 미리 빌드된 릴리스 바이너리를 내려받아 수동으로 옮겨 설치할 수 있습니다.
 
+CPU 아키텍처에 맞는 바이너리를 선택하세요:
+
+- `x86_64` / `amd64` → `sluice-linux-amd64`
+- `aarch64` / `arm64` → `sluice-linux-arm64`
+
+아키텍처 확인:
+
+```bash
+uname -m
+```
+
 ```bash
 # 인터넷이 되는 머신에서
-curl -fsSL https://github.com/ggos3/sluice/releases/download/v0.1.0/sluice-linux-amd64 -o sluice-linux-amd64
-curl -fsSL https://github.com/ggos3/sluice/releases/download/v0.1.0/sluice-checksums.txt -o sluice-checksums.txt
-grep " sluice-linux-amd64$" sluice-checksums.txt | sha256sum -c -
+VERSION="v0.1.1"
+ARCH="amd64" # ARM 서버면 arm64
+BIN="sluice-linux-${ARCH}"
+
+curl -fsSL "https://github.com/ggos3/sluice/releases/download/${VERSION}/${BIN}" -o "${BIN}"
+curl -fsSL "https://github.com/ggos3/sluice/releases/download/${VERSION}/sluice-checksums.txt" -o sluice-checksums.txt
+grep " ${BIN}$" sluice-checksums.txt | sha256sum -c -
 
 # 방화벽 서버로 바이너리 전송
-scp sluice-linux-amd64 user@firewalled-host:/tmp/sluice
+scp "${BIN}" user@firewalled-host:/tmp/sluice
 
 # 방화벽 서버에서 설치
 ssh user@firewalled-host 'sudo install -m 0755 /tmp/sluice /usr/local/bin/sluice'

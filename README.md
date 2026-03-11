@@ -53,18 +53,41 @@ curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.s
 curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- uninstall
 ```
 
+## Uninstall (Manual)
+
+If you installed manually (or want to remove it without the install script):
+
+```bash
+sudo rm -f /usr/local/bin/sluice
+```
+
 ## Install (Manual)
 
 If the target host cannot reach GitHub directly, download the prebuilt release binary on another machine and transfer it manually.
 
+Choose the binary that matches your CPU architecture:
+
+- `x86_64` / `amd64` → `sluice-linux-amd64`
+- `aarch64` / `arm64` → `sluice-linux-arm64`
+
+You can check with:
+
+```bash
+uname -m
+```
+
 ```bash
 # on a machine with internet access
-curl -fsSL https://github.com/ggos3/sluice/releases/download/v0.1.0/sluice-linux-amd64 -o sluice-linux-amd64
-curl -fsSL https://github.com/ggos3/sluice/releases/download/v0.1.0/sluice-checksums.txt -o sluice-checksums.txt
-grep " sluice-linux-amd64$" sluice-checksums.txt | sha256sum -c -
+VERSION="v0.1.1"
+ARCH="amd64" # set to arm64 for ARM servers
+BIN="sluice-linux-${ARCH}"
+
+curl -fsSL "https://github.com/ggos3/sluice/releases/download/${VERSION}/${BIN}" -o "${BIN}"
+curl -fsSL "https://github.com/ggos3/sluice/releases/download/${VERSION}/sluice-checksums.txt" -o sluice-checksums.txt
+grep " ${BIN}$" sluice-checksums.txt | sha256sum -c -
 
 # transfer the binary to the firewalled host
-scp sluice-linux-amd64 user@firewalled-host:/tmp/sluice
+scp "${BIN}" user@firewalled-host:/tmp/sluice
 
 # install on the firewalled host
 ssh user@firewalled-host 'sudo install -m 0755 /tmp/sluice /usr/local/bin/sluice'
