@@ -72,6 +72,19 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger) (runErr error) {
 		}
 	}()
 
+	marking := NewNftablesManager(cfg.Fwmark)
+	if err := marking.Setup(); err != nil {
+		return fmt.Errorf("setup packet marking: %w", err)
+	}
+	defer func() {
+		if err := marking.Cleanup(); err != nil {
+			closeErr = errors.Join(closeErr, fmt.Errorf("cleanup packet marking: %w", err))
+		}
+		if runErr == nil {
+			runErr = closeErr
+		}
+	}()
+
 	dialer := NewProxyDialer(net.JoinHostPort(proxyIP.String(), fmt.Sprint(cfg.ProxyPort)), cfg.ProxyUser, cfg.ProxyPass, cfg.Fwmark)
 
 	dialer.SetRulesEngine(rules.NewEngine(rules.Config{
