@@ -43,6 +43,8 @@ sudo sluice agent --port 18080
 
 설치 스크립트는 현재 OS/아키텍처에 맞는 GitHub Release 바이너리를 내려받고 체크섬을 검증합니다.
 
+Linux에서는 sudo `secure_path`에 `/usr/local/bin`이 없더라도 `sudo sluice ...`가 동작하도록 설치 시 `/usr/bin/sluice -> /usr/local/bin/sluice` 심볼릭 링크를 함께 만듭니다.
+
 Linux 릴리스 바이너리는 구버전/신버전 배포판 호환성을 높이기 위해 `CGO_ENABLED=0`으로 빌드됩니다.
 
 설치 스크립트 옵션 예시:
@@ -61,6 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.s
 
 ```bash
 sudo rm -f /usr/local/bin/sluice
+if [ -L /usr/bin/sluice ] && [ "$(readlink /usr/bin/sluice)" = "/usr/local/bin/sluice" ]; then sudo rm -f /usr/bin/sluice; fi
 ```
 
 ## 설치 (수동)

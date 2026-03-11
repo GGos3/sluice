@@ -43,6 +43,8 @@ sudo sluice agent --port 18080
 
 The installer downloads the matching GitHub Release binary for your OS/architecture and verifies its checksum.
 
+On Linux, the installer also creates `/usr/bin/sluice -> /usr/local/bin/sluice` so `sudo sluice ...` works even when sudo `secure_path` does not include `/usr/local/bin`.
+
 Linux release binaries are built with `CGO_ENABLED=0` to maximize compatibility across older/newer distributions.
 
 Optional installer flags:
@@ -61,6 +63,7 @@ If you installed manually (or want to remove it without the install script):
 
 ```bash
 sudo rm -f /usr/local/bin/sluice
+if [ -L /usr/bin/sluice ] && [ "$(readlink /usr/bin/sluice)" = "/usr/local/bin/sluice" ]; then sudo rm -f /usr/bin/sluice; fi
 ```
 
 ## Install (Manual)

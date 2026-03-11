@@ -6,6 +6,7 @@ SCRIPT_NAME=$(basename "$0")
 GITHUB_REPO="ggos3/sluice"
 BINARY_NAME="sluice"
 INSTALL_DIR="/usr/local/bin"
+SUDO_COMPAT_DIR="/usr/bin"
 CONFIG_DIR="/etc/sluice"
 ACTION="install"
 DRY_RUN=0
@@ -271,6 +272,9 @@ print_install_summary() {
     printf "  action: install\n"
     printf "  version: %s\n" "$INSTALL_VERSION"
     printf "  binary: %s/%s\n" "$INSTALL_DIR" "$BINARY_NAME"
+    if [ "$DETECTED_OS" = "linux" ]; then
+        printf "  sudo path compatibility: %s/%s\n" "$SUDO_COMPAT_DIR" "$BINARY_NAME"
+    fi
     printf "  config dir: %s\n" "$CONFIG_DIR"
 }
 
@@ -278,6 +282,9 @@ print_uninstall_summary() {
     printf "\nSummary:\n"
     printf "  action: uninstall\n"
     printf "  binary removed: %s/%s\n" "$INSTALL_DIR" "$BINARY_NAME"
+    if [ "$DETECTED_OS" = "linux" ]; then
+        printf "  sudo path compatibility removed: %s/%s (if managed by installer)\n" "$SUDO_COMPAT_DIR" "$BINARY_NAME"
+    fi
     if [ "$PURGE" -eq 1 ]; then
         printf "  config dir removed: %s\n" "$CONFIG_DIR"
     else
@@ -312,6 +319,9 @@ install_binary() {
         log_info "[dry-run] verify checksum for ${asset_name}"
         log_info "[dry-run] create ${CONFIG_DIR}"
         log_info "[dry-run] install ${asset_name} to ${INSTALL_DIR}/${BINARY_NAME}"
+        if [ "$DETECTED_OS" = "linux" ] && [ -d "$SUDO_COMPAT_DIR" ]; then
+            log_info "[dry-run] ensure sudo compatibility symlink ${SUDO_COMPAT_DIR}/${BINARY_NAME} -> ${INSTALL_DIR}/${BINARY_NAME}"
+        fi
         print_install_summary
         cleanup
         return 0
@@ -325,6 +335,24 @@ install_binary() {
     run_as_root mkdir -p "$CONFIG_DIR" || fail "failed to create ${CONFIG_DIR}"
     run_as_root install -m 0755 "$binary_tmp" "$INSTALL_DIR/$BINARY_NAME" || fail "failed to install ${BINARY_NAME} to ${INSTALL_DIR}"
 
+    if [ "$DETECTED_OS" = "linux" ] && [ -d "$SUDO_COMPAT_DIR" ]; then
+        sudo_compat_path="${SUDO_COMPAT_DIR}/${BINARY_NAME}"
+        install_target="${INSTALL_DIR}/${BINARY_NAME}"
+        if [ -L "$sudo_compat_path" ]; then
+            current_target=$(readlink "$sudo_compat_path" 2>/dev/null || true)
+            if [ "$current_target" = "$install_target" ]; then
+                log_info "sudo compatibility link already set: ${sudo_compat_path} -> ${install_target}"
+            else
+                log_warn "existing symlink at ${sudo_compat_path} points to ${current_target}; leaving unchanged"
+            fi
+        elif [ -e "$sudo_compat_path" ]; then
+            log_warn "${sudo_compat_path} already exists and is not a symlink; leaving unchanged"
+        else
+            run_as_root ln -s "$install_target" "$sudo_compat_path" || fail "failed to create sudo compatibility symlink at ${sudo_compat_path}"
+            log_success "created sudo compatibility symlink: ${sudo_compat_path} -> ${install_target}"
+        fi
+    fi
+
     log_success "installed ${BINARY_NAME} ${INSTALL_VERSION} to ${INSTALL_DIR}/${BINARY_NAME}"
     if [ -d "$CONFIG_DIR" ]; then
         log_success "ensured config directory exists at ${CONFIG_DIR}"
@@ -334,13 +362,26 @@ install_binary() {
 }
 
 uninstall_binary() {
+    detect_os
     target_path="${INSTALL_DIR}/${BINARY_NAME}"
+    sudo_compat_path="${SUDO_COMPAT_DIR}/${BINARY_NAME}"
 
     if [ -e "$target_path" ]; then
         run_as_root rm -f "$target_path" || fail "failed to remove ${target_path}"
         log_success "removed ${target_path}"
     else
         log_warn "binary not present: ${target_path}"
+    fi
+
+    if [ "$DETECTED_OS" = "linux" ] && [ -L "$sudo_compat_path" ]; then
+        current_target=$(readlink "$sudo_compat_path" 2>/dev/null || true)
+        expected_target="${INSTALL_DIR}/${BINARY_NAME}"
+        if [ "$current_target" = "$expected_target" ]; then
+            run_as_root rm -f "$sudo_compat_path" || fail "failed to remove ${sudo_compat_path}"
+            log_success "removed ${sudo_compat_path}"
+        else
+            log_warn "symlink ${sudo_compat_path} points to ${current_target}; leaving unchanged"
+        fi
     fi
 
     if [ "$PURGE" -eq 1 ]; then
