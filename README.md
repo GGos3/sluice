@@ -59,12 +59,12 @@ If the target host cannot reach GitHub directly, download the prebuilt release b
 
 ```bash
 # on a machine with internet access
-curl -fsSL https://github.com/ggos3/sluice/releases/download/v0.1.0/sluice-linux-amd64 -o sluice
+curl -fsSL https://github.com/ggos3/sluice/releases/download/v0.1.0/sluice-linux-amd64 -o sluice-linux-amd64
 curl -fsSL https://github.com/ggos3/sluice/releases/download/v0.1.0/sluice-checksums.txt -o sluice-checksums.txt
 grep " sluice-linux-amd64$" sluice-checksums.txt | sha256sum -c -
 
 # transfer the binary to the firewalled host
-scp sluice user@firewalled-host:/tmp/sluice
+scp sluice-linux-amd64 user@firewalled-host:/tmp/sluice
 
 # install on the firewalled host
 ssh user@firewalled-host 'sudo install -m 0755 /tmp/sluice /usr/local/bin/sluice'

@@ -59,12 +59,12 @@ curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.s
 
 ```bash
 # 인터넷이 되는 머신에서
-curl -fsSL https://github.com/ggos3/sluice/releases/download/v0.1.0/sluice-linux-amd64 -o sluice
+curl -fsSL https://github.com/ggos3/sluice/releases/download/v0.1.0/sluice-linux-amd64 -o sluice-linux-amd64
 curl -fsSL https://github.com/ggos3/sluice/releases/download/v0.1.0/sluice-checksums.txt -o sluice-checksums.txt
 grep " sluice-linux-amd64$" sluice-checksums.txt | sha256sum -c -
 
 # 방화벽 서버로 바이너리 전송
-scp sluice user@firewalled-host:/tmp/sluice
+scp sluice-linux-amd64 user@firewalled-host:/tmp/sluice
 
 # 방화벽 서버에서 설치
 ssh user@firewalled-host 'sudo install -m 0755 /tmp/sluice /usr/local/bin/sluice'
