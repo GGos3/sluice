@@ -85,16 +85,25 @@ Compatibility note:
 
 ```bash
 # on a machine with internet access
-VERSION="v0.1.1"
-ARCH="amd64" # set to arm64 for ARM servers
-BIN="sluice-linux-${ARCH}"
+# amd64
+curl -fsSL https://github.com/ggos3/sluice/releases/latest/download/sluice-linux-amd64 -o sluice-linux-amd64
 
-curl -fsSL "https://github.com/ggos3/sluice/releases/download/${VERSION}/${BIN}" -o "${BIN}"
-curl -fsSL "https://github.com/ggos3/sluice/releases/download/${VERSION}/sluice-checksums.txt" -o sluice-checksums.txt
-grep " ${BIN}$" sluice-checksums.txt | sha256sum -c -
+# arm64
+curl -fsSL https://github.com/ggos3/sluice/releases/latest/download/sluice-linux-arm64 -o sluice-linux-arm64
 
-# transfer the binary to the firewalled host
-scp "${BIN}" user@firewalled-host:/tmp/sluice
+# checksums (latest)
+curl -fsSL https://github.com/ggos3/sluice/releases/latest/download/sluice-checksums.txt -o sluice-checksums.txt
+
+# verify amd64 binary
+grep " sluice-linux-amd64$" sluice-checksums.txt | sha256sum -c -
+
+# verify arm64 binary
+grep " sluice-linux-arm64$" sluice-checksums.txt | sha256sum -c -
+
+# transfer the selected binary to the firewalled host
+scp sluice-linux-amd64 user@firewalled-host:/tmp/sluice
+# or
+scp sluice-linux-arm64 user@firewalled-host:/tmp/sluice
 
 # install on the firewalled host
 ssh user@firewalled-host 'sudo install -m 0755 /tmp/sluice /usr/local/bin/sluice'

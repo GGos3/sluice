@@ -85,16 +85,25 @@ uname -m
 
 ```bash
 # 인터넷이 되는 머신에서
-VERSION="v0.1.1"
-ARCH="amd64" # ARM 서버면 arm64
-BIN="sluice-linux-${ARCH}"
+# amd64
+curl -fsSL https://github.com/ggos3/sluice/releases/latest/download/sluice-linux-amd64 -o sluice-linux-amd64
 
-curl -fsSL "https://github.com/ggos3/sluice/releases/download/${VERSION}/${BIN}" -o "${BIN}"
-curl -fsSL "https://github.com/ggos3/sluice/releases/download/${VERSION}/sluice-checksums.txt" -o sluice-checksums.txt
-grep " ${BIN}$" sluice-checksums.txt | sha256sum -c -
+# arm64
+curl -fsSL https://github.com/ggos3/sluice/releases/latest/download/sluice-linux-arm64 -o sluice-linux-arm64
 
-# 방화벽 서버로 바이너리 전송
-scp "${BIN}" user@firewalled-host:/tmp/sluice
+# 체크섬 (latest)
+curl -fsSL https://github.com/ggos3/sluice/releases/latest/download/sluice-checksums.txt -o sluice-checksums.txt
+
+# amd64 검증
+grep " sluice-linux-amd64$" sluice-checksums.txt | sha256sum -c -
+
+# arm64 검증
+grep " sluice-linux-arm64$" sluice-checksums.txt | sha256sum -c -
+
+# 선택한 바이너리를 방화벽 서버로 전송
+scp sluice-linux-amd64 user@firewalled-host:/tmp/sluice
+# 또는
+scp sluice-linux-arm64 user@firewalled-host:/tmp/sluice
 
 # 방화벽 서버에서 설치
 ssh user@firewalled-host 'sudo install -m 0755 /tmp/sluice /usr/local/bin/sluice'
