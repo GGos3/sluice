@@ -110,6 +110,10 @@ scp sluice-linux-arm64 user@firewalled-host:/tmp/sluice
 
 # install on the firewalled host
 ssh user@firewalled-host 'sudo install -m 0755 /tmp/sluice /usr/local/bin/sluice'
+
+# optional but recommended on Linux:
+# ensure `sudo sluice ...` works when sudo secure_path excludes /usr/local/bin
+ssh user@firewalled-host 'sudo ln -sf /usr/local/bin/sluice /usr/bin/sluice'
 ```
 
 After installation, use the same `sluice` binary as the one-shot installer:

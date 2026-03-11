@@ -110,6 +110,10 @@ scp sluice-linux-arm64 user@firewalled-host:/tmp/sluice
 
 # 방화벽 서버에서 설치
 ssh user@firewalled-host 'sudo install -m 0755 /tmp/sluice /usr/local/bin/sluice'
+
+# Linux에서 권장:
+# sudo secure_path에 /usr/local/bin 이 없어도 `sudo sluice ...`가 동작하도록 링크 생성
+ssh user@firewalled-host 'sudo ln -sf /usr/local/bin/sluice /usr/bin/sluice'
 ```
 
 설치 후에는 원샷 설치와 동일하게 같은 `sluice` 바이너리를 사용하면 됩니다:
