@@ -12,7 +12,6 @@ DRY_RUN=0
 PURGE=0
 VERSION=""
 INSTALL_VERSION=""
-INSTALL_SOURCE="release"
 DETECTED_OS=""
 DETECTED_ARCH=""
 TMP_DIR=""
@@ -30,6 +29,8 @@ Usage: ${SCRIPT_NAME} [OPTIONS]
 Options:
   --install            Install ${BINARY_NAME} (default action)
   --uninstall          Remove installed ${BINARY_NAME}
+  install              Install ${BINARY_NAME} (positional alias)
+  uninstall            Remove installed ${BINARY_NAME} (positional alias)
   --purge              Remove ${CONFIG_DIR} during uninstall
   --version VERSION    Install a specific release tag (default: latest)
   --dry-run            Show what would be done without making changes
@@ -171,35 +172,6 @@ get_latest_version() {
     printf '%s' "$latest"
 }
 
-install_via_go() {
-    go_ref=$1
-
-    if [ "$DRY_RUN" -eq 1 ]; then
-        log_info "[dry-run] go install github.com/${GITHUB_REPO}/cmd/sluice@${go_ref}"
-        log_info "[dry-run] install ${BINARY_NAME} to ${INSTALL_DIR}/${BINARY_NAME}"
-        print_install_summary
-        cleanup
-        return 0
-    fi
-
-    command_exists go || fail "go is required for fallback installation (go install github.com/${GITHUB_REPO}/cmd/sluice@${go_ref})"
-
-    local_bin_dir="${TMP_DIR}/bin"
-    mkdir -p "$local_bin_dir" || fail "failed to create temporary go bin directory"
-
-    log_info "installing via go install (ref: ${go_ref})"
-    GOBIN="$local_bin_dir" go install "github.com/${GITHUB_REPO}/cmd/sluice@${go_ref}" || fail "go install failed"
-
-    [ -f "${local_bin_dir}/${BINARY_NAME}" ] || fail "go install did not produce ${BINARY_NAME}"
-
-    run_as_root mkdir -p "$CONFIG_DIR" || fail "failed to create ${CONFIG_DIR}"
-    run_as_root install -m 0755 "${local_bin_dir}/${BINARY_NAME}" "$INSTALL_DIR/$BINARY_NAME" || fail "failed to install ${BINARY_NAME} to ${INSTALL_DIR}"
-
-    log_success "installed ${BINARY_NAME} ${INSTALL_VERSION} to ${INSTALL_DIR}/${BINARY_NAME}"
-    print_install_summary
-    cleanup
-}
-
 create_temp_dir() {
     if [ "$DRY_RUN" -eq 1 ]; then
         TMP_DIR="/tmp/${BINARY_NAME}-install-dry-run"
@@ -248,6 +220,14 @@ parse_args() {
                 shift
                 ;;
             --uninstall)
+                ACTION="uninstall"
+                shift
+                ;;
+            install)
+                ACTION="install"
+                shift
+                ;;
+            uninstall)
                 ACTION="uninstall"
                 shift
                 ;;
@@ -312,22 +292,11 @@ install_binary() {
     if [ -n "$VERSION" ]; then
         INSTALL_VERSION="$VERSION"
     else
-        if INSTALL_VERSION=$(get_latest_version); then
-            INSTALL_SOURCE="release"
-        else
-            INSTALL_VERSION="main"
-            INSTALL_SOURCE="go-install"
-            log_warn "no GitHub release found; falling back to go install @main"
-        fi
+        INSTALL_VERSION=$(get_latest_version) || fail "no GitHub release found; publish a release or use --version to specify a tag"
     fi
 
     log_info "installing ${BINARY_NAME} ${INSTALL_VERSION} for ${DETECTED_OS}/${DETECTED_ARCH}"
     create_temp_dir
-
-    if [ "$INSTALL_SOURCE" = "go-install" ]; then
-        install_via_go "$INSTALL_VERSION"
-        return 0
-    fi
 
     asset_name="${BINARY_NAME}-${DETECTED_OS}-${DETECTED_ARCH}"
     release_base_url="https://github.com/${GITHUB_REPO}/releases/download/${INSTALL_VERSION}"
