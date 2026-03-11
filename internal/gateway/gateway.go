@@ -31,6 +31,14 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger) (runErr error) {
 		return fmt.Errorf("validate config: %w", err)
 	}
 
+	// Detect local IPv4 CIDRs and add to NoProxy list (fail-open on error)
+	if localCIDRs, err := detectLocalIPv4CIDRs(net.Interfaces); err != nil {
+		log.Warn("detect local IPv4 CIDRs failed, continuing", "error", err)
+	} else if len(localCIDRs) > 0 {
+		cfg.NoProxyIPRanges = append(cfg.NoProxyIPRanges, localCIDRs...)
+		log.Debug("detected local IPv4 CIDRs", "cidrs", localCIDRs)
+	}
+
 	proxyIP, err := resolveProxyIPv4(ctx, cfg.ProxyHost)
 	if err != nil {
 		return fmt.Errorf("resolve proxy ipv4: %w", err)
@@ -65,6 +73,7 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger) (runErr error) {
 	}()
 
 	dialer := NewProxyDialer(net.JoinHostPort(proxyIP.String(), fmt.Sprint(cfg.ProxyPort)), cfg.ProxyUser, cfg.ProxyPass, cfg.Fwmark)
+
 	dialer.SetRulesEngine(rules.NewEngine(rules.Config{
 		NoProxyDomains:  cfg.NoProxyDomains,
 		NoProxyIPRanges: cfg.NoProxyIPRanges,
