@@ -1,0 +1,50 @@
+# =============================================================================
+# Builder stage: compile sluice binary
+# =============================================================================
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /src
+
+ARG VERSION=dev
+ARG BUILD_TIME=unknown
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
+    -ldflags "-s -w -X main.version=${VERSION} -X main.buildTime=${BUILD_TIME}" \
+    -o /out/sluice ./cmd/sluice
+
+# =============================================================================
+# Agent stage: E2E test image with SSH server
+# =============================================================================
+FROM alpine:3.21 AS agent
+
+ARG VERSION=dev
+LABEL org.opencontainers.image.title="sluice-e2e-agent" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.source="https://github.com/ggos3/sluice" \
+      org.opencontainers.image.description="Sluice E2E agent with SSH server for tunnel testing"
+
+# Install SSH server and certificates
+RUN apk add --no-cache ca-certificates openssh-server bash iproute2 curl openssl
+
+# Refresh CA certificates trust store
+RUN update-ca-certificates
+
+COPY --from=builder /out/sluice /usr/local/bin/sluice
+COPY e2e/entrypoint-agent.sh /e2e/entrypoint-agent.sh
+RUN chmod +x /e2e/entrypoint-agent.sh
+
+# SSH configuration for E2E testing
+RUN sed -i 's/^#*AllowTcpForwarding.*/AllowTcpForwarding yes/' /etc/ssh/sshd_config && \
+    echo "PermitRootLogin yes" >> /etc/ssh/sshd_config && \
+    echo "PubkeyAuthentication yes" >> /etc/ssh/sshd_config && \
+    echo "PasswordAuthentication no" >> /etc/ssh/sshd_config && \
+    echo "HostKeyAlgorithms +ssh-rsa" >> /etc/ssh/sshd_config && \
+    echo "PubkeyAcceptedKeyTypes +ssh-rsa" >> /etc/ssh/sshd_config
+
+ENTRYPOINT ["/e2e/entrypoint-agent.sh"]

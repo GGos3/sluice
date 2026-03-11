@@ -74,6 +74,15 @@ cross-darwin-arm64:
 clean:
 	rm -rf bin/ coverage.out coverage.html
 
+# E2E tests
+.PHONY: e2e
+e2e:
+	./e2e/run.sh
+
+.PHONY: e2e-clean
+e2e-clean:
+	./e2e/run.sh --cleanup
+
 # Install locally
 .PHONY: install
 install:
@@ -96,5 +105,7 @@ help:
 	@echo "  fmt            - Format code"
 	@echo "  cross-build    - Cross-compile for linux/darwin (amd64/arm64)"
 	@echo "  clean          - Remove build artifacts"
+	@echo "  e2e            - Run E2E integration tests"
+	@echo "  e2e-clean      - Clean up E2E test resources"
 	@echo "  install        - Install binary to GOPATH/bin"
 	@echo "  tidy           - Tidy Go module dependencies"

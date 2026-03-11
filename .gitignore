@@ -5,3 +5,4 @@ coverage.html
 .env
 .docker/
 docker-buildx-cache/
+e2e/.ssh/
