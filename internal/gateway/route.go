@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"syscall"
 	"strings"
+	"syscall"
 
 	"github.com/vishvananda/netlink"
 )
@@ -150,6 +150,7 @@ func (m *RouteManager) Setup(tunName string, proxyIP net.IP) error {
 	defaultRoute := &netlink.Route{
 		Table:     m.policyValues().routeTable,
 		LinkIndex: tun.Attrs().Index,
+		Dst:       defaultIPv4Route(),
 	}
 
 	if err := m.handle().RouteReplace(bypassRoute); err != nil {
@@ -301,6 +302,10 @@ func isOwnedRule(rule netlink.Rule) bool {
 func hostRoute(ip net.IP) *net.IPNet {
 	masked := ip.Mask(net.CIDRMask(32, 32))
 	return &net.IPNet{IP: masked, Mask: net.CIDRMask(32, 32)}
+}
+
+func defaultIPv4Route() *net.IPNet {
+	return &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)}
 }
 
 func cloneIP(ip net.IP) net.IP {

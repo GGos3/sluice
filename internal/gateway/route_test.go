@@ -79,8 +79,8 @@ func TestRouteManagerSetup(t *testing.T) {
 	if got, want := defaultRoute.LinkIndex, 42; got != want {
 		t.Fatalf("defaultRoute.LinkIndex = %d, want %d", got, want)
 	}
-	if defaultRoute.Dst != nil {
-		t.Fatalf("defaultRoute.Dst = %#v, want nil", defaultRoute.Dst)
+	if got, want := defaultRoute.Dst.String(), defaultIPv4Route().String(); got != want {
+		t.Fatalf("defaultRoute.Dst = %q, want %q", got, want)
 	}
 
 	if len(fake.addedRules) != 1 {
