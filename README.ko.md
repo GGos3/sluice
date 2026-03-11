@@ -28,7 +28,7 @@
 
 ## 설치 (원샷)
 
-한 줄 명령으로 `sluice` 바이너리를 설치할 수 있습니다:
+한 줄 명령으로 미리 빌드된 `sluice` 릴리스 바이너리를 설치할 수 있습니다. 로컬 Go 도구체인은 필요하지 않습니다:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash
@@ -41,6 +41,8 @@ sluice server --tunnel user@remote-host --ssh-port 220
 sudo sluice agent --port 18080
 ```
 
+설치 스크립트는 현재 OS/아키텍처에 맞는 GitHub Release 바이너리를 내려받고 체크섬을 검증합니다.
+
 설치 스크립트 옵션 예시:
 
 ```bash
@@ -48,7 +50,7 @@ sudo sluice agent --port 18080
 curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- --version v0.1.0
 
 # 제거
-curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- uninstall
 ```
 
 ## 빠른 시작

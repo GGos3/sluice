@@ -28,7 +28,7 @@ The agent intercepts HTTP/HTTPS/DNS traffic and forwards it through an SSH rever
 
 ## Install (one-shot)
 
-Install the `sluice` binary with a single command:
+Install the prebuilt `sluice` release binary with a single command — no local Go toolchain required:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash
@@ -41,6 +41,8 @@ sluice server --tunnel user@remote-host --ssh-port 220
 sudo sluice agent --port 18080
 ```
 
+The installer downloads the matching GitHub Release binary for your OS/architecture and verifies its checksum.
+
 Optional installer flags:
 
 ```bash
@@ -48,7 +50,7 @@ Optional installer flags:
 curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- --version v0.1.0
 
 # uninstall
-curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- uninstall
 ```
 
 ## Quick start
