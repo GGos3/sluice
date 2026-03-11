@@ -30,7 +30,7 @@ func agentCmd(ctx context.Context, args []string) error {
 		return fmt.Errorf("postprocess config: %w", err)
 	}
 
-	cfg.ProxyHost = "localhost"
+	cfg.ProxyHost = "127.0.0.1"
 	cfg.ProxyPort = *port
 
 	if err := cfg.Validate(); err != nil {
