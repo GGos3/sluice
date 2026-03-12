@@ -1,6 +1,10 @@
 package acl
 
-import "testing"
+import (
+	"fmt"
+	"sync"
+	"testing"
+)
 
 func TestWhitelistIsAllowed(t *testing.T) {
 	tests := []struct {
@@ -167,5 +171,159 @@ func TestNewSkipsEmptyRules(t *testing.T) {
 
 	if len(whitelist.rules) != 2 {
 		t.Fatalf("len(rules) = %d, want 2", len(whitelist.rules))
+	}
+}
+
+func TestAddDeny_BlocksDomain(t *testing.T) {
+	w := New(false, nil)
+	w.AddDeny("evil.com")
+	if w.IsAllowed("evil.com") {
+		t.Fatal("expected evil.com to be denied")
+	}
+	if !w.IsAllowed("good.com") {
+		t.Fatal("expected good.com to be allowed")
+	}
+}
+
+func TestAddAllow_AllowsDomain(t *testing.T) {
+	w := New(true, []string{"existing.com"})
+	if w.IsAllowed("new.com") {
+		t.Fatal("expected new.com to be denied before AddAllow")
+	}
+	w.AddAllow("new.com")
+	if !w.IsAllowed("new.com") {
+		t.Fatal("expected new.com to be allowed after AddAllow")
+	}
+}
+
+func TestDenyTakesPrecedenceOverStaticWhitelist(t *testing.T) {
+	w := New(true, []string{"github.com"})
+	if !w.IsAllowed("github.com") {
+		t.Fatal("expected github.com to be allowed by static whitelist")
+	}
+	w.AddDeny("github.com")
+	if w.IsAllowed("github.com") {
+		t.Fatal("expected github.com to be denied after AddDeny")
+	}
+}
+
+func TestDenyTakesPrecedenceOverDynamicAllow(t *testing.T) {
+	w := New(true, nil)
+	w.AddAllow("test.com")
+	w.AddDeny("test.com")
+	if w.IsAllowed("test.com") {
+		t.Fatal("expected deny to take precedence over dynamic allow")
+	}
+}
+
+func TestRemove_FromDeny(t *testing.T) {
+	w := New(false, nil)
+	w.AddDeny("evil.com")
+	if w.IsAllowed("evil.com") {
+		t.Fatal("expected evil.com denied")
+	}
+	if !w.Remove("evil.com") {
+		t.Fatal("expected Remove to return true")
+	}
+	if !w.IsAllowed("evil.com") {
+		t.Fatal("expected evil.com allowed after remove")
+	}
+}
+
+func TestRemove_FromAllow(t *testing.T) {
+	w := New(true, nil)
+	w.AddAllow("new.com")
+	if !w.IsAllowed("new.com") {
+		t.Fatal("expected new.com allowed")
+	}
+	if !w.Remove("new.com") {
+		t.Fatal("expected Remove to return true")
+	}
+	if w.IsAllowed("new.com") {
+		t.Fatal("expected new.com denied after remove")
+	}
+}
+
+func TestRemove_NotFound(t *testing.T) {
+	w := New(false, nil)
+	if w.Remove("nonexistent.com") {
+		t.Fatal("expected Remove to return false for non-existent rule")
+	}
+}
+
+func TestDynamicRules_Snapshot(t *testing.T) {
+	w := New(true, []string{"static.com"})
+	w.AddDeny("evil.com")
+	w.AddAllow("good.com")
+	rules := w.DynamicRules()
+	if len(rules) != 2 {
+		t.Fatalf("DynamicRules() len = %d, want 2", len(rules))
+	}
+	if rules[0].Domain != "evil.com" || rules[0].Action != "deny" {
+		t.Fatalf("rules[0] = %+v, want {evil.com deny}", rules[0])
+	}
+	if rules[1].Domain != "good.com" || rules[1].Action != "allow" {
+		t.Fatalf("rules[1] = %+v, want {good.com allow}", rules[1])
+	}
+}
+
+func TestDynamicRules_Empty(t *testing.T) {
+	w := New(true, []string{"static.com"})
+	rules := w.DynamicRules()
+	if len(rules) != 0 {
+		t.Fatalf("DynamicRules() len = %d, want 0", len(rules))
+	}
+}
+
+func TestStaticRules_ReturnsConfigRules(t *testing.T) {
+	w := New(true, []string{"github.com", "*.example.com"})
+	rules := w.StaticRules()
+	if len(rules) != 2 {
+		t.Fatalf("StaticRules() len = %d, want 2", len(rules))
+	}
+}
+
+func TestConcurrentAccess(t *testing.T) {
+	w := New(true, []string{"github.com"})
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(4)
+		domain := fmt.Sprintf("domain%d.com", i)
+		go func() { defer wg.Done(); w.AddDeny(domain) }()
+		go func() { defer wg.Done(); w.AddAllow(domain) }()
+		go func() { defer wg.Done(); w.IsAllowed(domain) }()
+		go func() { defer wg.Done(); w.DynamicRules() }()
+	}
+	wg.Wait()
+}
+
+func TestNilWhitelist_DynamicMethods(t *testing.T) {
+	var w *Whitelist
+	w.AddDeny("test.com")
+	w.AddAllow("test.com")
+	w.Remove("test.com")
+	w.DynamicRules()
+	w.StaticRules()
+}
+
+func TestAddDeny_WildcardDomain(t *testing.T) {
+	w := New(true, []string{"*.example.com"})
+	if !w.IsAllowed("sub.example.com") {
+		t.Fatal("expected sub.example.com allowed by static whitelist")
+	}
+	w.AddDeny("*.example.com")
+	if w.IsAllowed("sub.example.com") {
+		t.Fatal("expected sub.example.com denied after wildcard deny")
+	}
+}
+
+func TestAddAllow_WildcardDomain(t *testing.T) {
+	w := New(true, nil)
+	w.AddAllow("*.trusted.com")
+	if !w.IsAllowed("app.trusted.com") {
+		t.Fatal("expected app.trusted.com allowed by wildcard allow")
+	}
+	if w.IsAllowed("trusted.com") {
+		t.Fatal("wildcard should not match apex domain")
 	}
 }
