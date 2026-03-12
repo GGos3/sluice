@@ -101,8 +101,8 @@ func (m *NftablesManager) Setup() error {
 	}
 
 	mark := m.fwmarkValue()
-	conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: newProtoMarkExprs(unix.IPPROTO_TCP, mark)})
-	conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: newProtoMarkExprs(unix.IPPROTO_UDP, mark)})
+	conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: protoMarkExprs(unix.IPPROTO_TCP, mark)})
+	conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: protoMarkExprs(unix.IPPROTO_UDP, mark)})
 
 	if err := conn.Flush(); err != nil {
 		return rollback(fmt.Errorf("flush nftables setup: %w", err))
@@ -164,15 +164,6 @@ func loopbackReturnExprs() []expr.Any {
 	}
 }
 
-func establishedRelatedReturnExprs() []expr.Any {
-	return []expr.Any{
-		&expr.Ct{Key: expr.CtKeySTATE, Register: nftReg1},
-		&expr.Bitwise{SourceRegister: nftReg1, DestRegister: nftReg1, Len: 4, Mask: nftU32(expr.CtStateBitESTABLISHED | expr.CtStateBitRELATED), Xor: nftU32(0)},
-		&expr.Cmp{Op: expr.CmpOpNeq, Register: nftReg1, Data: nftU32(0)},
-		&expr.Verdict{Kind: expr.VerdictReturn},
-	}
-}
-
 func sshBypassExprs(port int) []expr.Any {
 	return []expr.Any{
 		&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: nftReg1},
@@ -183,11 +174,17 @@ func sshBypassExprs(port int) []expr.Any {
 	}
 }
 
-func newProtoMarkExprs(proto uint8, mark int) []expr.Any {
+func establishedRelatedReturnExprs() []expr.Any {
 	return []expr.Any{
 		&expr.Ct{Key: expr.CtKeySTATE, Register: nftReg1},
-		&expr.Bitwise{SourceRegister: nftReg1, DestRegister: nftReg1, Len: 4, Mask: nftU32(expr.CtStateBitNEW), Xor: nftU32(0)},
+		&expr.Bitwise{SourceRegister: nftReg1, DestRegister: nftReg1, Len: 4, Mask: nftU32(expr.CtStateBitESTABLISHED | expr.CtStateBitRELATED), Xor: nftU32(0)},
 		&expr.Cmp{Op: expr.CmpOpNeq, Register: nftReg1, Data: nftU32(0)},
+		&expr.Verdict{Kind: expr.VerdictReturn},
+	}
+}
+
+func protoMarkExprs(proto uint8, mark int) []expr.Any {
+	return []expr.Any{
 		&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: nftReg1},
 		&expr.Cmp{Op: expr.CmpOpEq, Register: nftReg1, Data: []byte{proto}},
 		&expr.Immediate{Register: nftReg1, Data: nftU32(uint32(mark))},
@@ -203,7 +200,7 @@ func nftU16(v uint16) []byte {
 
 func nftU32(v uint32) []byte {
 	b := make([]byte, 4)
-	binary.BigEndian.PutUint32(b, v)
+	binary.LittleEndian.PutUint32(b, v)
 	return b
 }
 

@@ -560,48 +560,21 @@ func assertSSHBypassRule(t *testing.T, rule *nftables.Rule, table *nftables.Tabl
 func assertMarkRule(t *testing.T, rule *nftables.Rule, table *nftables.Table, chain *nftables.Chain, proto uint8, mark int) {
 	t.Helper()
 	assertRuleLocation(t, rule, table, chain)
-	if got, want := len(rule.Exprs), 7; got != want {
+	if got, want := len(rule.Exprs), 4; got != want {
 		t.Fatalf("len(rule.Exprs) = %d, want %d", got, want)
 	}
 
-	ct, ok := rule.Exprs[0].(*expr.Ct)
+	meta, ok := rule.Exprs[0].(*expr.Meta)
 	if !ok {
-		t.Fatalf("expr[0] = %T, want *expr.Ct", rule.Exprs[0])
-	}
-	if got, want := ct.Key, expr.CtKeySTATE; got != want {
-		t.Fatalf("ct.Key = %v, want %v", got, want)
-	}
-
-	bitwise, ok := rule.Exprs[1].(*expr.Bitwise)
-	if !ok {
-		t.Fatalf("expr[1] = %T, want *expr.Bitwise", rule.Exprs[1])
-	}
-	if got, want := bitwise.Mask, nftU32(expr.CtStateBitNEW); !reflect.DeepEqual(got, want) {
-		t.Fatalf("bitwise.Mask = %#v, want %#v", got, want)
-	}
-
-	stateCmp, ok := rule.Exprs[2].(*expr.Cmp)
-	if !ok {
-		t.Fatalf("expr[2] = %T, want *expr.Cmp", rule.Exprs[2])
-	}
-	if got, want := stateCmp.Op, expr.CmpOpNeq; got != want {
-		t.Fatalf("stateCmp.Op = %v, want %v", got, want)
-	}
-	if got, want := stateCmp.Data, nftU32(0); !reflect.DeepEqual(got, want) {
-		t.Fatalf("stateCmp.Data = %#v, want %#v", got, want)
-	}
-
-	meta, ok := rule.Exprs[3].(*expr.Meta)
-	if !ok {
-		t.Fatalf("expr[3] = %T, want *expr.Meta", rule.Exprs[3])
+		t.Fatalf("expr[0] = %T, want *expr.Meta", rule.Exprs[0])
 	}
 	if got, want := meta.Key, expr.MetaKeyL4PROTO; got != want {
 		t.Fatalf("meta.Key = %v, want %v", got, want)
 	}
 
-	protoCmp, ok := rule.Exprs[4].(*expr.Cmp)
+	protoCmp, ok := rule.Exprs[1].(*expr.Cmp)
 	if !ok {
-		t.Fatalf("expr[4] = %T, want *expr.Cmp", rule.Exprs[4])
+		t.Fatalf("expr[1] = %T, want *expr.Cmp", rule.Exprs[1])
 	}
 	if got, want := protoCmp.Op, expr.CmpOpEq; got != want {
 		t.Fatalf("protoCmp.Op = %v, want %v", got, want)
@@ -610,9 +583,9 @@ func assertMarkRule(t *testing.T, rule *nftables.Rule, table *nftables.Table, ch
 		t.Fatalf("protoCmp.Data = %#v, want %#v", got, want)
 	}
 
-	immediate, ok := rule.Exprs[5].(*expr.Immediate)
+	immediate, ok := rule.Exprs[2].(*expr.Immediate)
 	if !ok {
-		t.Fatalf("expr[5] = %T, want *expr.Immediate", rule.Exprs[5])
+		t.Fatalf("expr[2] = %T, want *expr.Immediate", rule.Exprs[2])
 	}
 	if got, want := immediate.Register, uint32(nftReg1); got != want {
 		t.Fatalf("immediate.Register = %d, want %d", got, want)
@@ -621,9 +594,9 @@ func assertMarkRule(t *testing.T, rule *nftables.Rule, table *nftables.Table, ch
 		t.Fatalf("immediate.Data = %#v, want %#v", got, want)
 	}
 
-	markMeta, ok := rule.Exprs[6].(*expr.Meta)
+	markMeta, ok := rule.Exprs[3].(*expr.Meta)
 	if !ok {
-		t.Fatalf("expr[6] = %T, want *expr.Meta", rule.Exprs[6])
+		t.Fatalf("expr[3] = %T, want *expr.Meta", rule.Exprs[3])
 	}
 	if got, want := markMeta.Key, expr.MetaKeyMARK; got != want {
 		t.Fatalf("markMeta.Key = %v, want %v", got, want)
