@@ -1,0 +1,26 @@
+[Unit]
+Description=Sluice Transparent Proxy Agent
+Documentation=https://github.com/ggos3/sluice
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/sluice agent --port 18080
+Restart=on-failure
+RestartSec=5s
+
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sluice-agent
+
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+DeviceAllow=/dev/net/tun rw
+
+[Install]
+WantedBy=multi-user.target

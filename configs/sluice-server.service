@@ -1,0 +1,24 @@
+[Unit]
+Description=Sluice Forward Proxy Server
+Documentation=https://github.com/ggos3/sluice
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/sluice server --config /etc/sluice/config.yaml
+Restart=on-failure
+RestartSec=5s
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sluice-server
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/etc/sluice /var/log/sluice
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
