@@ -10,12 +10,16 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/ggos3/sluice/internal/acl"
 	"github.com/ggos3/sluice/internal/config"
+	"github.com/ggos3/sluice/internal/control"
+	"github.com/ggos3/sluice/internal/daemon"
 	"github.com/ggos3/sluice/internal/dns"
 	"github.com/ggos3/sluice/internal/logger"
 	"github.com/ggos3/sluice/internal/proxy"
@@ -66,11 +70,17 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, `Usage: sluice <command> [flags]
 
 Commands:
-  server    Start the proxy server
-  run       Run a command with proxy environment variables
-  gateway   Run as transparent proxy gateway (Linux only)
-  agent     Run as transparent proxy agent (Linux only)
-  version   Show version information
+  server [start] [user@host[:port]]   Start the proxy server
+  server stop                          Stop the proxy server daemon
+  server deny <domain>                 Deny a domain at runtime
+  server allow <domain>                Allow a domain at runtime
+  server remove <domain>               Remove a runtime domain rule
+  server rules                         List active domain rules
+  agent [start]                        Run as transparent proxy agent (Linux only)
+  agent stop                           Stop the agent daemon
+  run                                  Run a command with proxy environment variables
+  gateway                              Run as transparent proxy gateway (Linux only)
+  version                              Show version information
 
 Run 'sluice <command> -h' for more information on a command.
 `)
@@ -143,13 +153,41 @@ func runCmd(ctx context.Context, args []string) error {
 	return fmt.Errorf("exec failed: %w", err)
 }
 
+// serverCmd routes server subcommands.
 func serverCmd(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("server", flag.ContinueOnError)
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return serverStartCmd(ctx, args)
+	}
+
+	switch args[0] {
+	case "start":
+		return serverStartCmd(ctx, args[1:])
+	case "stop":
+		return stopServiceCmd("server", args[1:])
+	case "deny", "allow", "remove", "rules":
+		return controlCmd(args[0], args[1:])
+	default:
+		// Could be a positional tunnel target (user@host), route to serverStartCmd
+		return serverStartCmd(ctx, args)
+	}
+}
+
+func serverStartCmd(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("server start", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	configPath := fs.String("config", "configs/config.yaml", "path to configuration file")
-	tunnelTarget := fs.String("tunnel", "", "SSH reverse tunnel in user@host format")
-	sshPort := fs.Int("ssh-port", 22, "SSH port for tunnel connection")
 	port := fs.Int("port", 18080, "proxy server listen port")
+	daemonize := fs.Bool("daemon", false, "run as background daemon")
+	pidFile := fs.String("pid-file", "/var/run/sluice/server.pid", "PID file path (daemon mode)")
+	logDir := fs.String("log-dir", "/var/log/sluice", "log directory (daemon mode)")
+	socketPath := fs.String("socket", control.DefaultSocketPath, "control socket path")
+
+	// Handle -d alias for --daemon
+	for i, arg := range args {
+		if arg == "-d" {
+			args[i] = "--daemon"
+		}
+	}
 
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
@@ -158,14 +196,33 @@ func serverCmd(ctx context.Context, args []string) error {
 		return err
 	}
 
+	// Parse positional tunnel target from remaining args
+	var tunnelTarget string
+	if remaining := fs.Args(); len(remaining) > 0 {
+		tunnelTarget = remaining[0]
+	}
+	useTunnel := tunnelTarget != ""
+
+	// Daemon mode: parent spawns child and exits
+	if *daemonize {
+		if !daemon.IsChild() && !daemon.IsSystemd() {
+			childArgs := daemon.StripFlag(os.Args, "-d")
+			childArgs = daemon.StripFlag(childArgs, "--daemon")
+			logFile := filepath.Join(*logDir, "server.log")
+			return daemon.Daemonize(daemon.Config{
+				PIDFile: *pidFile,
+				LogFile: logFile,
+				Args:    childArgs,
+			})
+		}
+	}
+
 	portOverridden := false
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "port" {
 			portOverridden = true
 		}
 	})
-
-	useTunnel := strings.TrimSpace(*tunnelTarget) != ""
 
 	var (
 		cfg       *config.Config
@@ -196,7 +253,29 @@ func serverCmd(ctx context.Context, args []string) error {
 		log.Info("generated default config", "path", *configPath)
 	}
 
+	// Write PID file if we are the daemon child
+	if daemon.IsChild() {
+		if writeErr := daemon.WritePID(*pidFile, os.Getpid()); writeErr != nil {
+			log.Warn("failed to write pid file", "error", writeErr)
+		}
+		defer func() {
+			_ = daemon.RemovePID(*pidFile)
+		}()
+	}
+
 	whitelist := acl.New(cfg.Whitelist.Enabled, cfg.Whitelist.Domains)
+
+	// Start control server (non-fatal if it fails)
+	ctrlServer := control.NewServer(*socketPath, whitelist, log)
+	if ctrlErr := ctrlServer.Start(); ctrlErr != nil {
+		log.Warn("control server failed to start", "error", ctrlErr)
+	}
+	defer func() {
+		if stopErr := ctrlServer.Stop(); stopErr != nil {
+			log.Warn("control server stop error", "error", stopErr)
+		}
+	}()
+
 	dohHandler := dns.NewHandler(log)
 
 	var opts []proxy.Option
@@ -242,25 +321,25 @@ func serverCmd(ctx context.Context, args []string) error {
 
 	var tunnelMgr *tunnel.Manager
 	if useTunnel {
-		user, host, err := parseTunnelTarget(*tunnelTarget)
-		if err != nil {
-			return err
+		user, host, sshPort, parseErr := parseTunnelTarget(tunnelTarget)
+		if parseErr != nil {
+			return parseErr
 		}
 
 		tunnelCfg := tunnel.Config{
 			RemoteUser:     user,
 			RemoteHost:     host,
-			SSHPort:        *sshPort,
+			SSHPort:        sshPort,
 			LocalPort:      *port,
 			RemoteBindPort: *port,
 		}
 
 		tunnelMgr = tunnel.NewManager(tunnelCfg, log)
-		if err := tunnelMgr.Start(runCtx); err != nil {
+		if startErr := tunnelMgr.Start(runCtx); startErr != nil {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			_ = srv.Shutdown(shutdownCtx)
-			return fmt.Errorf("start tunnel: %w", err)
+			return fmt.Errorf("start tunnel: %w", startErr)
 		}
 	}
 
@@ -302,20 +381,102 @@ func serverCmd(ctx context.Context, args []string) error {
 	return nil
 }
 
-func parseTunnelTarget(value string) (string, string, error) {
-	target := strings.TrimSpace(value)
-	user, host, ok := strings.Cut(target, "@")
-	if !ok || strings.TrimSpace(user) == "" || strings.TrimSpace(host) == "" {
-		return "", "", fmt.Errorf("invalid --tunnel value %q: expected user@host", value)
+// stopServiceCmd stops a running daemon by PID file.
+func stopServiceCmd(service string, args []string) error {
+	fs := flag.NewFlagSet(service+" stop", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	pidFile := fs.String("pid-file", fmt.Sprintf("/var/run/sluice/%s.pid", service), "PID file path")
+
+	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return nil
+		}
+		return err
 	}
 
-	host = strings.TrimSpace(host)
-	if h, p, err := net.SplitHostPort(host); err == nil {
-		if strings.TrimSpace(h) == "" || strings.TrimSpace(p) == "" {
-			return "", "", fmt.Errorf("invalid --tunnel value %q: expected user@host", value)
+	if err := daemon.StopProcess(*pidFile); err != nil {
+		return fmt.Errorf("stop %s: %w", service, err)
+	}
+
+	fmt.Fprintf(os.Stderr, "%s stopped\n", service)
+	return nil
+}
+
+// controlCmd sends a domain management command to the running server via Unix socket.
+func controlCmd(action string, args []string) error {
+	fs := flag.NewFlagSet("server "+action, flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	socketPath := fs.String("socket", control.DefaultSocketPath, "control socket path")
+
+	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return nil
+		}
+		return err
+	}
+
+	var domain string
+	if action != "rules" {
+		remaining := fs.Args()
+		if len(remaining) == 0 {
+			return fmt.Errorf("%s: domain argument required", action)
+		}
+		domain = remaining[0]
+	}
+
+	resp, err := control.SendCommand(*socketPath, control.Request{
+		Action: action,
+		Domain: domain,
+	})
+	if err != nil {
+		return fmt.Errorf("%s: %w", action, err)
+	}
+
+	if !resp.OK {
+		return fmt.Errorf("%s: %s", action, resp.Error)
+	}
+
+	if action == "rules" {
+		if len(resp.Rules) == 0 {
+			fmt.Println("no rules")
+			return nil
+		}
+		for _, r := range resp.Rules {
+			fmt.Printf("%-6s  %-40s  (%s)\n", r.Action, r.Domain, r.Source)
+		}
+	} else {
+		fmt.Println(resp.Message)
+	}
+
+	return nil
+}
+
+func parseTunnelTarget(value string) (user, host string, sshPort int, err error) {
+	target := strings.TrimSpace(value)
+	u, hostPort, ok := strings.Cut(target, "@")
+	if !ok || strings.TrimSpace(u) == "" || strings.TrimSpace(hostPort) == "" {
+		return "", "", 0, fmt.Errorf("invalid tunnel target %q: expected user@host[:port]", value)
+	}
+
+	user = strings.TrimSpace(u)
+	hostPort = strings.TrimSpace(hostPort)
+
+	h, p, splitErr := net.SplitHostPort(hostPort)
+	if splitErr != nil {
+		// No port specified, use default
+		host = hostPort
+		sshPort = 22
+	} else {
+		if strings.TrimSpace(h) == "" {
+			return "", "", 0, fmt.Errorf("invalid tunnel target %q: empty host", value)
 		}
 		host = h
+		portNum, parseErr := strconv.Atoi(p)
+		if parseErr != nil || portNum <= 0 || portNum > 65535 {
+			return "", "", 0, fmt.Errorf("invalid tunnel target %q: invalid port %q", value, p)
+		}
+		sshPort = portNum
 	}
 
-	return strings.TrimSpace(user), host, nil
+	return user, host, sshPort, nil
 }
