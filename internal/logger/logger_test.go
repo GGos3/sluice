@@ -4,9 +4,46 @@ import (
 	"bytes"
 	"encoding/json"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestEnsureLogDir_Creates(t *testing.T) {
+	base := t.TempDir()
+	target := filepath.Join(base, "logs", "proxy")
+
+	if err := EnsureLogDir(target); err != nil {
+		t.Fatalf("expected directory creation to succeed, got %v", err)
+	}
+
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("expected directory to exist, got %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected %s to be a directory", target)
+	}
+}
+
+func TestEnsureLogDir_ExistingDir(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "logs")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("setup existing dir: %v", err)
+	}
+
+	if err := EnsureLogDir(target); err != nil {
+		t.Fatalf("expected no error for existing directory, got %v", err)
+	}
+}
+
+func TestEnsureLogDir_EmptyString(t *testing.T) {
+	err := EnsureLogDir("   ")
+	if err == nil {
+		t.Fatal("expected error for empty directory path")
+	}
+}
 
 func TestParseLevelInvalid(t *testing.T) {
 	_, err := ParseLevel("verbose")

@@ -1,12 +1,22 @@
 package logger
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"strings"
 )
+
+func EnsureLogDir(dir string) error {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return errors.New("log directory path is required")
+	}
+
+	return os.MkdirAll(dir, 0o755)
+}
 
 type AccessLogEntry struct {
 	SourceIP   string
