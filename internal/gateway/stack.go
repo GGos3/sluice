@@ -195,8 +195,8 @@ func (s *Stack) ServeDNS(addr netip.AddrPort, handler DNSHandler) error {
 	return nil
 }
 
-func (s *Stack) ServeDNSOverHTTPS(addr netip.AddrPort, proxyAddr string, client *http.Client) error {
-	return s.ServeDNS(addr, NewDNSRelayHandler(proxyAddr, client))
+func (s *Stack) ServeDNSOverHTTPS(addr netip.AddrPort, proxyAddr string, controlMark int, client *http.Client) error {
+	return s.ServeDNS(addr, NewDNSRelayHandler(proxyAddr, controlMark, client))
 }
 
 func (s *Stack) debugCounts() (rx, tx int64) {

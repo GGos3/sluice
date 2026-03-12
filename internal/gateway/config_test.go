@@ -18,27 +18,29 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name: "valid config with all defaults",
 			cfg: &Config{
-				ProxyPort:    18080,
-				LogLevel:     "info",
-				LogFormat:    "json",
-				TUNName:      "sluice0",
-				RouteTable:   100,
-				RulePriority: 10010,
-				Fwmark:       0x1,
+				ProxyPort:     18080,
+				LogLevel:      "info",
+				LogFormat:     "json",
+				TUNName:       "sluice0",
+				RouteTable:    100,
+				RulePriority:  10010,
+				Fwmark:        0x1,
+				ControlFwmark: 0x2,
 			},
 			wantErr: "",
 		},
 		{
 			name: "valid config with proxy host",
 			cfg: &Config{
-				ProxyHost:    "127.0.0.1",
-				ProxyPort:    18080,
-				LogLevel:     "info",
-				LogFormat:    "json",
-				TUNName:      "sluice0",
-				RouteTable:   100,
-				RulePriority: 10010,
-				Fwmark:       0x1,
+				ProxyHost:     "127.0.0.1",
+				ProxyPort:     18080,
+				LogLevel:      "info",
+				LogFormat:     "json",
+				TUNName:       "sluice0",
+				RouteTable:    100,
+				RulePriority:  10010,
+				Fwmark:        0x1,
+				ControlFwmark: 0x2,
 			},
 			wantErr: "",
 		},
@@ -190,6 +192,9 @@ func TestConfigDefault(t *testing.T) {
 	if cfg.Fwmark != defaultFwmark {
 		t.Fatalf("Fwmark = %d, want %d", cfg.Fwmark, defaultFwmark)
 	}
+	if cfg.ControlFwmark != defaultControlMark {
+		t.Fatalf("ControlFwmark = %d, want %d", cfg.ControlFwmark, defaultControlMark)
+	}
 
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Default() config should pass validation, got error: %v", err)
@@ -300,7 +305,7 @@ func TestNewConfigFromFlags(t *testing.T) {
 		expectedFlags := []string{
 			"proxy-host", "proxy-port", "proxy-user", "proxy-pass",
 			"no-proxy", "log-level", "log-format", "tun-name",
-			"route-table", "rule-priority", "fwmark", "config",
+			"route-table", "rule-priority", "fwmark", "control-fwmark", "config",
 		}
 
 		for _, name := range expectedFlags {
@@ -381,6 +386,7 @@ tun_name: "sluice1"
 route_table: 200
 rule_priority: 10020
 fwmark: 0x2
+control_fwmark: 0x3
 `
 		tmpFile, err := os.CreateTemp("", "sluice-config-*.yaml")
 		if err != nil {
@@ -430,6 +436,9 @@ fwmark: 0x2
 		}
 		if cfg.TUNName != "sluice1" {
 			t.Fatalf("TUNName = %q, want %q", cfg.TUNName, "sluice1")
+		}
+		if cfg.ControlFwmark != 0x3 {
+			t.Fatalf("ControlFwmark = %d, want %d", cfg.ControlFwmark, 0x3)
 		}
 	})
 

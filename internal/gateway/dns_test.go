@@ -42,7 +42,7 @@ func TestDNSInterceptorRelaysWireMessageBytes(t *testing.T) {
 	}))
 	defer server.Close()
 
-	interceptor := newDNSInterceptor(server.URL, nil)
+	interceptor := newDNSInterceptor(server.URL, defaultControlMark, nil)
 
 	response, err := interceptor.handleQuery(context.Background(), query)
 	if err != nil {
@@ -80,7 +80,7 @@ func TestDNSInterceptorTimeout(t *testing.T) {
 	defer server.Close()
 
 	client := &http.Client{Timeout: 20 * time.Millisecond}
-	interceptor := newDNSInterceptor(server.URL, client)
+	interceptor := newDNSInterceptor(server.URL, defaultControlMark, client)
 
 	_, err := interceptor.handleQuery(context.Background(), []byte{0x01, 0x02})
 	if err == nil {
@@ -99,7 +99,7 @@ func TestDNSInterceptorHTTPError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	interceptor := newDNSInterceptor(server.URL, nil)
+	interceptor := newDNSInterceptor(server.URL, defaultControlMark, nil)
 
 	_, err := interceptor.handleQuery(context.Background(), []byte{0x01, 0x02})
 	if err == nil {

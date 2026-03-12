@@ -7,9 +7,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 const dnsMessageContentType = "application/dns-message"
@@ -17,11 +21,12 @@ const dnsMessageContentType = "application/dns-message"
 const defaultDNSRelayTimeout = 5 * time.Second
 
 type dnsInterceptor struct {
-	dohURL string
-	client *http.Client
+	dohURL      string
+	client      *http.Client
+	controlMark int
 }
 
-func newDNSInterceptor(proxyAddr string, client *http.Client) *dnsInterceptor {
+func newDNSInterceptor(proxyAddr string, controlMark int, client *http.Client) *dnsInterceptor {
 	proxyAddr = strings.TrimSpace(proxyAddr)
 	proxyAddr = strings.TrimSuffix(proxyAddr, "/")
 	if !strings.HasPrefix(proxyAddr, "http://") && !strings.HasPrefix(proxyAddr, "https://") {
@@ -29,17 +34,28 @@ func newDNSInterceptor(proxyAddr string, client *http.Client) *dnsInterceptor {
 	}
 
 	if client == nil {
-		client = &http.Client{Timeout: defaultDNSRelayTimeout}
+		transport := &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout: defaultDNSRelayTimeout,
+				Control: func(_, _ string, c syscall.RawConn) error {
+					return c.Control(func(fd uintptr) {
+						_ = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_MARK, controlMark)
+					})
+				},
+			}).DialContext,
+		}
+		client = &http.Client{Timeout: defaultDNSRelayTimeout, Transport: transport}
 	}
 
 	return &dnsInterceptor{
-		dohURL: proxyAddr + "/dns-query",
-		client: client,
+		dohURL:      proxyAddr + "/dns-query",
+		client:      client,
+		controlMark: controlMark,
 	}
 }
 
-func NewDNSRelayHandler(proxyAddr string, client *http.Client) DNSHandler {
-	interceptor := newDNSInterceptor(proxyAddr, client)
+func NewDNSRelayHandler(proxyAddr string, controlMark int, client *http.Client) DNSHandler {
+	interceptor := newDNSInterceptor(proxyAddr, controlMark, client)
 	return interceptor.handleQuery
 }
 

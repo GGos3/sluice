@@ -72,7 +72,7 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger) (runErr error) {
 		}
 	}()
 
-	marking := NewNftablesManager(cfg.Fwmark)
+	marking := NewNftablesManager(cfg.Fwmark, cfg.ControlFwmark)
 	if err := marking.Setup(); err != nil {
 		return fmt.Errorf("setup packet marking: %w", err)
 	}
@@ -85,14 +85,14 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger) (runErr error) {
 		}
 	}()
 
-	dialer := NewProxyDialer(net.JoinHostPort(proxyIP.String(), fmt.Sprint(cfg.ProxyPort)), cfg.ProxyUser, cfg.ProxyPass, cfg.Fwmark)
+	dialer := NewProxyDialer(net.JoinHostPort(proxyIP.String(), fmt.Sprint(cfg.ProxyPort)), cfg.ProxyUser, cfg.ProxyPass, cfg.ControlFwmark)
 
 	dialer.SetRulesEngine(rules.NewEngine(rules.Config{
 		NoProxyDomains:  cfg.NoProxyDomains,
 		NoProxyIPRanges: cfg.NoProxyIPRanges,
 	}))
 
-	if err := stack.ServeDNSOverHTTPS(netip.AddrPortFrom(netip.IPv4Unspecified(), 53), net.JoinHostPort(cfg.ProxyHost, fmt.Sprint(cfg.ProxyPort)), nil); err != nil {
+	if err := stack.ServeDNSOverHTTPS(netip.AddrPortFrom(netip.IPv4Unspecified(), 53), net.JoinHostPort(cfg.ProxyHost, fmt.Sprint(cfg.ProxyPort)), cfg.ControlFwmark, nil); err != nil {
 		return fmt.Errorf("listen dns: %w", err)
 	}
 

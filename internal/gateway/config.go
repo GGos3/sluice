@@ -18,6 +18,7 @@ const (
 	defaultRouteTable   = 100
 	defaultRulePriority = 10010
 	defaultFwmark       = 0x1
+	defaultControlMark  = 0x2
 )
 
 var (
@@ -34,31 +35,33 @@ var (
 )
 
 type Config struct {
-	ProxyHost        string
-	ProxyPort        int
-	ProxyUser        string
-	ProxyPass        string
-	NoProxyDomains   []string
-	NoProxyIPRanges  []string
-	LogLevel         string
-	LogFormat        string
-	TUNName          string
-	RouteTable       int
-	RulePriority     int
-	Fwmark           int
-	configFile       string
-	noProxyValue     string
+	ProxyHost       string
+	ProxyPort       int
+	ProxyUser       string
+	ProxyPass       string
+	NoProxyDomains  []string
+	NoProxyIPRanges []string
+	LogLevel        string
+	LogFormat       string
+	TUNName         string
+	RouteTable      int
+	RulePriority    int
+	Fwmark          int
+	ControlFwmark   int
+	configFile      string
+	noProxyValue    string
 }
 
 func Default() *Config {
 	return &Config{
-		ProxyPort:    defaultProxyPort,
-		LogLevel:     defaultLogLevel,
-		LogFormat:    defaultLogFormat,
-		TUNName:      defaultTUNName,
-		RouteTable:   defaultRouteTable,
-		RulePriority: defaultRulePriority,
-		Fwmark:       defaultFwmark,
+		ProxyPort:     defaultProxyPort,
+		LogLevel:      defaultLogLevel,
+		LogFormat:     defaultLogFormat,
+		TUNName:       defaultTUNName,
+		RouteTable:    defaultRouteTable,
+		RulePriority:  defaultRulePriority,
+		Fwmark:        defaultFwmark,
+		ControlFwmark: defaultControlMark,
 	}
 }
 
@@ -104,6 +107,7 @@ func NewConfigFromFlags(fs *flag.FlagSet) *Config {
 	fs.IntVar(&cfg.RouteTable, "route-table", defaultRouteTable, "routing table number")
 	fs.IntVar(&cfg.RulePriority, "rule-priority", defaultRulePriority, "ip rule priority")
 	fs.IntVar(&cfg.Fwmark, "fwmark", defaultFwmark, "fwmark value for routing bypass")
+	fs.IntVar(&cfg.ControlFwmark, "control-fwmark", defaultControlMark, "fwmark value for internal control-plane traffic bypass")
 	fs.StringVar(&cfg.configFile, "config", "", "path to YAML configuration file")
 
 	return cfg
@@ -190,6 +194,7 @@ func loadYAMLConfig(path string, cfg *Config) error {
 		RouteTable      int      `yaml:"route_table"`
 		RulePriority    int      `yaml:"rule_priority"`
 		Fwmark          int      `yaml:"fwmark"`
+		ControlFwmark   int      `yaml:"control_fwmark"`
 	}
 
 	if err := yaml.Unmarshal(data, &yamlCfg); err != nil {
@@ -231,6 +236,9 @@ func loadYAMLConfig(path string, cfg *Config) error {
 	}
 	if yamlCfg.Fwmark != 0 {
 		cfg.Fwmark = yamlCfg.Fwmark
+	}
+	if yamlCfg.ControlFwmark != 0 {
+		cfg.ControlFwmark = yamlCfg.ControlFwmark
 	}
 
 	return nil

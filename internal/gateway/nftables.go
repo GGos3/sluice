@@ -45,20 +45,22 @@ func (systemNFTables) New() (nftablesConn, error) {
 }
 
 type NftablesManager struct {
-	api      nftablesAPI
-	table    string
-	chain    string
-	fwmark   int
-	sshPorts []int
+	api         nftablesAPI
+	table       string
+	chain       string
+	fwmark      int
+	controlMark int
+	sshPorts    []int
 }
 
-func NewNftablesManager(fwmark int) *NftablesManager {
+func NewNftablesManager(fwmark, controlMark int) *NftablesManager {
 	return &NftablesManager{
-		api:      systemNFTables{},
-		table:    sluiceNFTablesTable,
-		chain:    sluiceNFTablesChain,
-		fwmark:   fwmark,
-		sshPorts: detectSSHPorts(defaultSSHDConfigPath),
+		api:         systemNFTables{},
+		table:       sluiceNFTablesTable,
+		chain:       sluiceNFTablesChain,
+		fwmark:      fwmark,
+		controlMark: controlMark,
+		sshPorts:    detectSSHPorts(defaultSSHDConfigPath),
 	}
 }
 
@@ -100,7 +102,7 @@ func (m *NftablesManager) Setup() error {
 		conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: sshBypassExprs(port)})
 	}
 
-	conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: dnsBypassExprs()})
+	conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: controlMarkBypassExprs(m.controlMarkValue())})
 
 	mark := m.fwmarkValue()
 	conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: protoMarkExprs(unix.IPPROTO_TCP, mark)})
@@ -176,12 +178,10 @@ func sshBypassExprs(port int) []expr.Any {
 	}
 }
 
-func dnsBypassExprs() []expr.Any {
+func controlMarkBypassExprs(controlMark int) []expr.Any {
 	return []expr.Any{
-		&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: nftReg1},
-		&expr.Cmp{Op: expr.CmpOpEq, Register: nftReg1, Data: []byte{unix.IPPROTO_UDP}},
-		&expr.Payload{DestRegister: nftReg1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
-		&expr.Cmp{Op: expr.CmpOpEq, Register: nftReg1, Data: nftU16(53)},
+		&expr.Meta{Key: expr.MetaKeyMARK, Register: nftReg1},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: nftReg1, Data: nftU32(uint32(controlMark))},
 		&expr.Verdict{Kind: expr.VerdictReturn},
 	}
 }
@@ -253,6 +253,13 @@ func (m *NftablesManager) fwmarkValue() int {
 		return m.fwmark
 	}
 	return defaultFwmark
+}
+
+func (m *NftablesManager) controlMarkValue() int {
+	if m != nil && m.controlMark != 0 {
+		return m.controlMark
+	}
+	return defaultControlMark
 }
 
 func (m *NftablesManager) sshPortsValues() []int {
