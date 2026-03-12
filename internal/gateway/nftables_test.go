@@ -50,7 +50,7 @@ func TestNftablesSetupCreatesOwnedRulesInOrder(t *testing.T) {
 		t.Fatalf("deletedTables[0].Name = %q, want %q", got, want)
 	}
 
-	if got, want := setupConn.operations, []string{"AddTable", "AddChain", "AddRule", "AddRule", "AddRule", "AddRule", "AddRule", "AddRule", "Flush"}; !reflect.DeepEqual(got, want) {
+	if got, want := setupConn.operations, []string{"AddTable", "AddChain", "AddRule", "AddRule", "AddRule", "AddRule", "AddRule", "AddRule", "AddRule", "Flush"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("setup operations = %#v, want %#v", got, want)
 	}
 	if got, want := len(setupConn.addedTables), 1; got != want {
@@ -59,7 +59,7 @@ func TestNftablesSetupCreatesOwnedRulesInOrder(t *testing.T) {
 	if got, want := len(setupConn.addedChains), 1; got != want {
 		t.Fatalf("addedChains = %d, want %d", got, want)
 	}
-	if got, want := len(setupConn.addedRules), 6; got != want {
+	if got, want := len(setupConn.addedRules), 7; got != want {
 		t.Fatalf("addedRules = %d, want %d", got, want)
 	}
 
@@ -92,8 +92,9 @@ func TestNftablesSetupCreatesOwnedRulesInOrder(t *testing.T) {
 	assertEstablishedRelatedRule(t, setupConn.addedRules[1], table, chain)
 	assertSSHBypassRule(t, setupConn.addedRules[2], table, chain, 22)
 	assertSSHBypassRule(t, setupConn.addedRules[3], table, chain, 220)
-	assertMarkRule(t, setupConn.addedRules[4], table, chain, unix.IPPROTO_TCP, 0x9)
-	assertMarkRule(t, setupConn.addedRules[5], table, chain, unix.IPPROTO_UDP, 0x9)
+	assertDNSBypassRule(t, setupConn.addedRules[4], table, chain)
+	assertMarkRule(t, setupConn.addedRules[5], table, chain, unix.IPPROTO_TCP, 0x9)
+	assertMarkRule(t, setupConn.addedRules[6], table, chain, unix.IPPROTO_UDP, 0x9)
 	if got, want := setupConn.flushCalls, 1; got != want {
 		t.Fatalf("flushCalls = %d, want %d", got, want)
 	}
@@ -187,12 +188,13 @@ func TestNftablesSetupUsesDefaultFwmark(t *testing.T) {
 		t.Fatalf("Setup() error = %v", err)
 	}
 
-	if got, want := len(setupConn.addedRules), 5; got != want {
+	if got, want := len(setupConn.addedRules), 6; got != want {
 		t.Fatalf("addedRules = %d, want %d", got, want)
 	}
 	assertSSHBypassRule(t, setupConn.addedRules[2], setupConn.addedTables[0], setupConn.addedChains[0], 22)
-	assertMarkRule(t, setupConn.addedRules[3], setupConn.addedTables[0], setupConn.addedChains[0], unix.IPPROTO_TCP, defaultFwmark)
-	assertMarkRule(t, setupConn.addedRules[4], setupConn.addedTables[0], setupConn.addedChains[0], unix.IPPROTO_UDP, defaultFwmark)
+	assertDNSBypassRule(t, setupConn.addedRules[3], setupConn.addedTables[0], setupConn.addedChains[0])
+	assertMarkRule(t, setupConn.addedRules[4], setupConn.addedTables[0], setupConn.addedChains[0], unix.IPPROTO_TCP, defaultFwmark)
+	assertMarkRule(t, setupConn.addedRules[5], setupConn.addedTables[0], setupConn.addedChains[0], unix.IPPROTO_UDP, defaultFwmark)
 }
 
 func TestNftablesReconcileIsIdempotent(t *testing.T) {
@@ -606,6 +608,66 @@ func assertMarkRule(t *testing.T, rule *nftables.Rule, table *nftables.Table, ch
 	}
 	if got, want := markMeta.Register, uint32(nftReg1); got != want {
 		t.Fatalf("markMeta.Register = %d, want %d", got, want)
+	}
+}
+
+func assertDNSBypassRule(t *testing.T, rule *nftables.Rule, table *nftables.Table, chain *nftables.Chain) {
+	t.Helper()
+	assertRuleLocation(t, rule, table, chain)
+	if got, want := len(rule.Exprs), 5; got != want {
+		t.Fatalf("len(rule.Exprs) = %d, want %d", got, want)
+	}
+
+	meta, ok := rule.Exprs[0].(*expr.Meta)
+	if !ok {
+		t.Fatalf("expr[0] = %T, want *expr.Meta", rule.Exprs[0])
+	}
+	if got, want := meta.Key, expr.MetaKeyL4PROTO; got != want {
+		t.Fatalf("meta.Key = %v, want %v", got, want)
+	}
+
+	protoCmp, ok := rule.Exprs[1].(*expr.Cmp)
+	if !ok {
+		t.Fatalf("expr[1] = %T, want *expr.Cmp", rule.Exprs[1])
+	}
+	if got, want := protoCmp.Op, expr.CmpOpEq; got != want {
+		t.Fatalf("protoCmp.Op = %v, want %v", got, want)
+	}
+	if got, want := protoCmp.Data, []byte{unix.IPPROTO_UDP}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("protoCmp.Data = %#v, want %#v", got, want)
+	}
+
+	payload, ok := rule.Exprs[2].(*expr.Payload)
+	if !ok {
+		t.Fatalf("expr[2] = %T, want *expr.Payload", rule.Exprs[2])
+	}
+	if got, want := payload.Base, expr.PayloadBaseTransportHeader; got != want {
+		t.Fatalf("payload.Base = %v, want %v", got, want)
+	}
+	if got, want := payload.Offset, uint32(2); got != want {
+		t.Fatalf("payload.Offset = %d, want %d", got, want)
+	}
+	if got, want := payload.Len, uint32(2); got != want {
+		t.Fatalf("payload.Len = %d, want %d", got, want)
+	}
+
+	portCmp, ok := rule.Exprs[3].(*expr.Cmp)
+	if !ok {
+		t.Fatalf("expr[3] = %T, want *expr.Cmp", rule.Exprs[3])
+	}
+	if got, want := portCmp.Op, expr.CmpOpEq; got != want {
+		t.Fatalf("portCmp.Op = %v, want %v", got, want)
+	}
+	if got, want := portCmp.Data, nftU16(53); !reflect.DeepEqual(got, want) {
+		t.Fatalf("portCmp.Data = %#v, want %#v", got, want)
+	}
+
+	verdict, ok := rule.Exprs[4].(*expr.Verdict)
+	if !ok {
+		t.Fatalf("expr[4] = %T, want *expr.Verdict", rule.Exprs[4])
+	}
+	if got, want := verdict.Kind, expr.VerdictReturn; got != want {
+		t.Fatalf("verdict.Kind = %v, want %v", got, want)
 	}
 }
 
