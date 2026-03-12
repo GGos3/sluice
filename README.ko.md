@@ -2,176 +2,101 @@
 
 > English documentation: **[README.md](./README.md)**
 
-**방화벽 환경의 서버에서도, SSH 포트 하나로 인터넷을 사용하세요.**
+**방화벽으로 막힌 Linux 호스트에서도 SSH 포트 하나로 인터넷을 사용하세요.**
 
-`sluice`는 서버 측에서 포워드 프록시를 실행하고, 차단된 호스트 측에서 Linux 투명 에이전트를 실행합니다.
-에이전트는 HTTP/HTTPS/DNS 트래픽을 가로채어 SSH 리버스 터널(`-R`)로 프록시에 전달합니다.
+`sluice`는 단일 바이너리 기반 프록시 시스템입니다.
+- `server`: 포워드 프록시 + 선택적 DoH 엔드포인트
+- `agent`(Linux): 투명 인터셉트(TUN/netstack)
+
+차단된 호스트의 트래픽은 SSH 리버스 터널(`ssh -R`)을 통해 프록시 호스트로 전달됩니다.
+
+## 핵심 원리 (어떻게 동작하나)
+
+`sluice agent`의 핵심은 **nftables 마킹 기반 투명 인터셉트**입니다.
+
+에이전트 시작 시 다음을 수행합니다:
+1. TUN 디바이스와 userspace TCP/IP 스택을 생성합니다.
+2. nftables output 체인 규칙으로 outbound 트래픽을 마킹합니다.
+3. 마킹된 패킷에 대해 policy routing(`ip rule` + 전용 route table)을 구성합니다.
+4. 마킹된 트래픽을 TUN으로 보내고, netstack이 아래 포트를 처리합니다.
+   - DNS `:53` (DoH로 relay)
+   - HTTP `:80`
+   - HTTPS `:443`
+5. 최종 업스트림은 `127.0.0.1:{port}` 프록시 엔드포인트(SSH reverse-tunnel bind)로 전달합니다.
+
+루프 방지를 위해 control-plane 트래픽은 별도 `control-fwmark` bypass 경로를 사용합니다.
 
 ## 아키텍처
 
 ```text
 ┌──────────────────┐          ┌──────────────────┐          ┌──────────────┐
 │ 차단된 호스트       │──────────│ 프록시 호스트        │──────────│ 인터넷 대상    │
-│ (agent)          │  SSH -R  │ (sluice server)  │  HTTP/S  │              │
-│                  │  암호화   │ + DoH endpoint    │          │              │
+│ (agent, Linux)   │  SSH -R  │ (sluice server)  │  HTTP/S  │              │
+│ nft mark + TUN   │  암호화   │ + /dns-query     │          │              │
 └──────────────────┘          └──────────────────┘          └──────────────┘
 ```
 
-## 주요 기능
+## 요구사항
 
-- SSH 리버스 터널 오케스트레이션 (`server --tunnel user@host`)
-- Linux 투명 에이전트 (TUN/netstack)
-- 동일한 sluice 포트에서 DNS-over-HTTPS 제공 (`/dns-query`)
-- 도메인 화이트리스트(서버 ACL) 및 선택적 프록시 인증
-- 클라이언트 제외 규칙 (`--no-proxy`, 도메인/CIDR)
-- 구조화된 접근 로그
+- Agent 모드: Linux + root 권한
+- 커널 네트워킹 권한/Capabilities (`NET_ADMIN`, 컨테이너 환경은 `NET_RAW`도 필요할 수 있음)
+- TUN 디바이스 사용 가능 (`/dev/net/tun`)
+- nftables 지원 (`nf_tables`)
+- 프록시 호스트에서 차단 호스트로 SSH 접속 가능
 
-## 설치 (원샷)
+## 빠른 시작
 
-한 줄 명령으로 미리 빌드된 `sluice` 릴리스 바이너리를 설치할 수 있습니다. 로컬 Go 도구체인은 필요하지 않습니다:
+### 1) 설치
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash
 ```
 
-설치 후 동일한 `sluice` 바이너리로 서버/에이전트를 실행합니다:
+### 2) 프록시 서버 + 리버스 터널 오케스트레이션 시작
 
 ```bash
-sluice server --tunnel user@remote-host --ssh-port 220
-sudo sluice agent --port 18080
+sluice server --tunnel user@blocked-host --ssh-port 220 --port 18080
 ```
 
-설치 스크립트는 현재 OS/아키텍처에 맞는 GitHub Release 바이너리를 내려받고 체크섬을 검증합니다.
-
-Linux에서는 sudo `secure_path`에 `/usr/local/bin`이 없더라도 `sudo sluice ...`가 동작하도록 설치 시 `/usr/bin/sluice -> /usr/local/bin/sluice` 심볼릭 링크를 함께 만듭니다.
-
-Linux 릴리스 바이너리는 구버전/신버전 배포판 호환성을 높이기 위해 `CGO_ENABLED=0`으로 빌드됩니다.
-
-설치 스크립트 옵션 예시:
-
-```bash
-# 특정 릴리스 버전 설치
-curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- --version v0.1.0
-
-# 제거
-curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- uninstall
-```
-
-## 제거 (수동)
-
-수동 설치했거나 설치 스크립트 없이 직접 삭제하려면:
-
-```bash
-sudo rm -f /usr/local/bin/sluice
-if [ -L /usr/bin/sluice ] && [ "$(readlink /usr/bin/sluice)" = "/usr/local/bin/sluice" ]; then sudo rm -f /usr/bin/sluice; fi
-```
-
-## 설치 (수동)
-
-대상 호스트가 GitHub에 직접 접근할 수 없다면, 다른 머신에서 미리 빌드된 릴리스 바이너리를 내려받아 수동으로 옮겨 설치할 수 있습니다.
-
-CPU 아키텍처에 맞는 바이너리를 선택하세요:
-
-- `x86_64` / `amd64` → `sluice-linux-amd64`
-- `aarch64` / `arm64` → `sluice-linux-arm64`
-
-아키텍처 확인:
-
-```bash
-uname -m
-```
-
-호환성 참고:
-
-- `linux-amd64`, `linux-arm64` 릴리스 바이너리는 광범위한 배포판 호환성을 위해 cgo 없이(`CGO_ENABLED=0`) 빌드됩니다.
-- Linux agent 모드는 별도로 커널 권한/Capabilities(`NET_ADMIN`, root)가 필요합니다.
-
-```bash
-# 인터넷이 되는 머신에서
-# amd64
-curl -fsSL https://github.com/ggos3/sluice/releases/latest/download/sluice-linux-amd64 -o sluice-linux-amd64
-
-# arm64
-curl -fsSL https://github.com/ggos3/sluice/releases/latest/download/sluice-linux-arm64 -o sluice-linux-arm64
-
-# 체크섬 (latest)
-curl -fsSL https://github.com/ggos3/sluice/releases/latest/download/sluice-checksums.txt -o sluice-checksums.txt
-
-# amd64 검증
-grep " sluice-linux-amd64$" sluice-checksums.txt | sha256sum -c -
-
-# arm64 검증
-grep " sluice-linux-arm64$" sluice-checksums.txt | sha256sum -c -
-
-# 선택한 바이너리를 방화벽 서버로 전송
-scp sluice-linux-amd64 user@firewalled-host:/tmp/sluice
-# 또는
-scp sluice-linux-arm64 user@firewalled-host:/tmp/sluice
-
-# 방화벽 서버에서 설치
-ssh user@firewalled-host 'sudo install -m 0755 /tmp/sluice /usr/local/bin/sluice'
-
-# Linux에서 권장:
-# sudo secure_path에 /usr/local/bin 이 없어도 `sudo sluice ...`가 동작하도록 링크 생성
-ssh user@firewalled-host 'sudo ln -sf /usr/local/bin/sluice /usr/bin/sluice'
-```
-
-설치 후에는 원샷 설치와 동일하게 같은 `sluice` 바이너리를 사용하면 됩니다:
-
-```bash
-sluice server --tunnel user@remote-host --ssh-port 220
-sudo sluice agent --port 18080
-```
-
-## 빠른 시작
-
-### 1) 프록시 서버 + 리버스 터널 시작
-
-```bash
-sluice server --tunnel user@remote-host
-```
-
-원격 SSH 데몬이 기본 포트(22)가 아닌 포트(예: `220`)를 사용할 경우:
-
-```bash
-sluice server --tunnel user@remote-host --ssh-port 220
-```
-
-sluice 프록시 포트도 함께 변경할 수 있습니다:
-
-```bash
-sluice server --tunnel user@remote-host --ssh-port 220 --port 18080
-```
-
-### 2) 차단된 호스트에서 에이전트 시작 (Linux, root)
+### 3) 차단된 호스트에서 agent 시작 (Linux)
 
 ```bash
 sudo sluice agent --port 18080
 ```
 
-### 3) 확인
+### 4) 확인
 
 ```bash
 curl https://github.com
 ```
 
-## 수동 SSH 리버스 터널 (선택)
+## DNS 경로
 
-자동 터널 모드 대신 직접 SSH 리버스 터널을 열 수도 있습니다:
+- Agent가 DNS(`:53`)를 인터셉트하고, DoH로 `http://127.0.0.1:{port}/dns-query`에 relay합니다.
+- DNS 자기재귀 루프 방지를 위해 control-plane mark bypass를 사용합니다.
+
+## 모드
+
+- `server` — 포워드 프록시 서버(및 선택적 자동 SSH reverse tunnel)
+- `agent` — Linux 투명 인터셉트 모드
+- `gateway` — Linux 게이트웨이 모드
+- `run` — 명령 단위 프록시 환경
+
+`run` 예시:
 
 ```bash
-# 프록시 호스트
-./sluice server --port 18080
-
-# 차단된 호스트에서 (SSH 포트 22)
-ssh -R 18080:localhost:18080 user@proxy-host -N
-
-# 차단된 호스트에서 (SSH 포트 220)
-ssh -p 220 -R 18080:localhost:18080 user@proxy-host -N
-
-# 에이전트
-sudo ./sluice agent --port 18080
+sluice run -- curl https://example.com
+sluice run --port 18080 -- curl https://example.com
+sluice run --proxy-host 127.0.0.1 --port 18080 -- curl https://example.com
 ```
+
+## 설정
+
+- 서버 설정: `configs/config.yaml`
+- 에이전트 제외 규칙: `--no-proxy "*.internal.example,10.0.0.0/8"`
+- agent 마킹 제어:
+  - `--fwmark`: 인터셉트 데이터 경로용
+  - `--control-fwmark`: control-plane bypass용
 
 ## Docker
 
@@ -181,7 +106,7 @@ sudo ./sluice agent --port 18080
 docker run -d --name sluice-server \
   -v ~/.ssh:/root/.ssh:ro \
   ghcr.io/ggos3/sluice-server \
-  --tunnel user@remote-host --ssh-port 220
+  --tunnel user@blocked-host --ssh-port 220 --port 18080
 ```
 
 ### 에이전트 이미지 (Linux host)
@@ -190,25 +115,37 @@ docker run -d --name sluice-server \
 docker run -d --name sluice-agent \
   --net=host \
   --cap-add=NET_ADMIN \
-  ghcr.io/ggos3/sluice-agent
+  --cap-add=NET_RAW \
+  --device /dev/net/tun:/dev/net/tun \
+  ghcr.io/ggos3/sluice-agent \
+  --port 18080
 ```
 
-## 설정 및 모드
+## E2E 테스트
 
-- 서버 설정: `configs/config.yaml`
-- 에이전트 제외 규칙: `--no-proxy "*.internal.example,10.0.0.0/8"`
-- 모드:
-  - `server`
-  - `gateway` (Linux 전용)
-  - `agent` (Linux 전용)
-  - `run` (명령 단위 프록시 환경)
-
-`run` 모드 예시:
+Docker 기반 firewall + tunnel end-to-end 검증:
 
 ```bash
-./sluice run -- curl https://example.com
-./sluice run --port 18080 -- curl https://example.com
-./sluice run --proxy-host 127.0.0.1 --port 18080 -- curl https://example.com
+make e2e
+```
+
+검증 내용:
+- firewall이 agent -> server 직접 접근을 차단하는지
+- reverse tunnel이 정상 연결되는지
+- 인터셉트된 HTTP/HTTPS 요청이 sluice 경로로 성공하는지
+
+## 수동 설치 / 제거
+
+원샷 설치가 어려운 경우(오프라인 전송, 에어갭 환경 등)에는 릴리스 자산으로 수동 설치하세요:
+- `sluice-linux-amd64` 또는 `sluice-linux-arm64` 다운로드
+- `sluice-checksums.txt`로 무결성 검증
+- `/usr/local/bin/sluice`에 설치
+
+수동 제거:
+
+```bash
+sudo rm -f /usr/local/bin/sluice
+if [ -L /usr/bin/sluice ] && [ "$(readlink /usr/bin/sluice)" = "/usr/local/bin/sluice" ]; then sudo rm -f /usr/bin/sluice; fi
 ```
 
 ## 프로젝트 구조
@@ -217,7 +154,7 @@ docker run -d --name sluice-agent \
 - `internal/proxy/` — HTTP/HTTPS 프록시 핵심
 - `internal/tunnel/` — SSH 리버스 터널 매니저
 - `internal/dns/` — DoH 핸들러
-- `internal/gateway/` — 투명 에이전트 핵심
+- `internal/gateway/` — 투명 에이전트 핵심(TUN + nftables + policy routing)
 - `internal/rules/` — 클라이언트 우회 규칙
 - `internal/acl/` — 서버 화이트리스트
 

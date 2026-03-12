@@ -2,176 +2,101 @@
 
 > Korean documentation: **[README.ko.md](./README.ko.md)**
 
-**Use internet from firewalled servers through a single SSH port.**
+**Use internet from firewalled Linux hosts through a single SSH port.**
 
-`sluice` runs a forward proxy on the server side and a Linux transparent agent on the blocked host side.
-The agent intercepts HTTP/HTTPS/DNS traffic and forwards it through an SSH reverse tunnel (`-R`) to the proxy.
+`sluice` is a single-binary Go proxy system:
+- `server`: forward proxy + optional DoH endpoint
+- `agent` (Linux): transparent interception with TUN/netstack
+
+The blocked host sends traffic through an SSH reverse tunnel (`ssh -R`) to the proxy host.
+
+## Core idea (how it works)
+
+`sluice agent` is **nftables mark-based transparent interception**.
+
+At startup, the agent:
+1. Creates a TUN device and userspace TCP/IP stack.
+2. Installs nftables output-chain rules to mark outbound traffic.
+3. Installs policy routing (`ip rule` + custom route table) for packets with that fwmark.
+4. Sends marked traffic into TUN, where netstack serves:
+   - DNS on `:53` (relayed as DoH)
+   - HTTP on `:80`
+   - HTTPS on `:443`
+5. Forwards upstream via proxy endpoint `127.0.0.1:{port}` (the SSH reverse-tunnel bind).
+
+To avoid loops, control-plane traffic uses a separate `control-fwmark` bypass path.
 
 ## Architecture
 
 ```text
 ┌──────────────────┐          ┌──────────────────┐          ┌──────────────┐
 │ Blocked Host     │──────────│ Proxy Host       │──────────│ Internet     │
-│ (agent)          │  SSH -R  │ (sluice server)  │  HTTP/S  │ targets      │
-│                  │ encrypted│ + DoH endpoint   │          │              │
+│ (agent, Linux)   │  SSH -R  │ (sluice server)  │  HTTP/S  │ targets      │
+│ nft mark + TUN   │ encrypted│ + /dns-query     │          │              │
 └──────────────────┘          └──────────────────┘          └──────────────┘
 ```
 
-## Highlights
+## Requirements
 
-- SSH reverse tunnel orchestration (`server --tunnel user@host`)
-- Transparent Linux agent (TUN/netstack)
-- DNS-over-HTTPS over the same sluice port (`/dns-query`)
-- Domain whitelist (server ACL) and optional proxy auth
-- Client-side exclusion rules (`--no-proxy` with domains/CIDRs)
-- Structured access logs
+- Agent mode: Linux + root privileges
+- Kernel networking privileges/capabilities (`NET_ADMIN`; containerized runs may also need `NET_RAW`)
+- TUN device available (`/dev/net/tun`)
+- nftables support (`nf_tables`)
+- SSH access from proxy host to blocked host
 
-## Install (one-shot)
+## Quick start
 
-Install the prebuilt `sluice` release binary with a single command — no local Go toolchain required:
+### 1) Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash
 ```
 
-After installation, use the same `sluice` binary for both modes:
+### 2) Start proxy server + reverse tunnel orchestration
 
 ```bash
-sluice server --tunnel user@remote-host --ssh-port 220
-sudo sluice agent --port 18080
+sluice server --tunnel user@blocked-host --ssh-port 220 --port 18080
 ```
 
-The installer downloads the matching GitHub Release binary for your OS/architecture and verifies its checksum.
-
-On Linux, the installer also creates `/usr/bin/sluice -> /usr/local/bin/sluice` so `sudo sluice ...` works even when sudo `secure_path` does not include `/usr/local/bin`.
-
-Linux release binaries are built with `CGO_ENABLED=0` to maximize compatibility across older/newer distributions.
-
-Optional installer flags:
-
-```bash
-# install a specific release tag
-curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- --version v0.1.0
-
-# uninstall
-curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.sh | bash -s -- uninstall
-```
-
-## Uninstall (Manual)
-
-If you installed manually (or want to remove it without the install script):
-
-```bash
-sudo rm -f /usr/local/bin/sluice
-if [ -L /usr/bin/sluice ] && [ "$(readlink /usr/bin/sluice)" = "/usr/local/bin/sluice" ]; then sudo rm -f /usr/bin/sluice; fi
-```
-
-## Install (Manual)
-
-If the target host cannot reach GitHub directly, download the prebuilt release binary on another machine and transfer it manually.
-
-Choose the binary that matches your CPU architecture:
-
-- `x86_64` / `amd64` → `sluice-linux-amd64`
-- `aarch64` / `arm64` → `sluice-linux-arm64`
-
-You can check with:
-
-```bash
-uname -m
-```
-
-Compatibility note:
-
-- `linux-amd64` and `linux-arm64` release binaries are built without cgo (`CGO_ENABLED=0`) for broad distro compatibility.
-- For Linux agent mode, kernel capabilities/permissions are still required (`NET_ADMIN`, root).
-
-```bash
-# on a machine with internet access
-# amd64
-curl -fsSL https://github.com/ggos3/sluice/releases/latest/download/sluice-linux-amd64 -o sluice-linux-amd64
-
-# arm64
-curl -fsSL https://github.com/ggos3/sluice/releases/latest/download/sluice-linux-arm64 -o sluice-linux-arm64
-
-# checksums (latest)
-curl -fsSL https://github.com/ggos3/sluice/releases/latest/download/sluice-checksums.txt -o sluice-checksums.txt
-
-# verify amd64 binary
-grep " sluice-linux-amd64$" sluice-checksums.txt | sha256sum -c -
-
-# verify arm64 binary
-grep " sluice-linux-arm64$" sluice-checksums.txt | sha256sum -c -
-
-# transfer the selected binary to the firewalled host
-scp sluice-linux-amd64 user@firewalled-host:/tmp/sluice
-# or
-scp sluice-linux-arm64 user@firewalled-host:/tmp/sluice
-
-# install on the firewalled host
-ssh user@firewalled-host 'sudo install -m 0755 /tmp/sluice /usr/local/bin/sluice'
-
-# optional but recommended on Linux:
-# ensure `sudo sluice ...` works when sudo secure_path excludes /usr/local/bin
-ssh user@firewalled-host 'sudo ln -sf /usr/local/bin/sluice /usr/bin/sluice'
-```
-
-After installation, use the same `sluice` binary as the one-shot installer:
-
-```bash
-sluice server --tunnel user@remote-host --ssh-port 220
-sudo sluice agent --port 18080
-```
-
-## Quick start
-
-### 1) Start proxy server + reverse tunnel
-
-```bash
-sluice server --tunnel user@remote-host
-```
-
-If the remote SSH daemon uses a non-default port (for example `220`):
-
-```bash
-sluice server --tunnel user@remote-host --ssh-port 220
-```
-
-You can also change the sluice port:
-
-```bash
-sluice server --tunnel user@remote-host --ssh-port 220 --port 18080
-```
-
-### 2) Start agent on the blocked host (Linux, root)
+### 3) Start agent on blocked host (Linux)
 
 ```bash
 sudo sluice agent --port 18080
 ```
 
-### 3) Verify
+### 4) Verify
 
 ```bash
 curl https://github.com
 ```
 
-## Manual SSH reverse tunnel (optional)
+## DNS path
 
-Instead of auto-tunnel mode, you can create the reverse tunnel yourself:
+- Agent intercepts DNS (`:53`) and relays upstream using DoH to server `http://127.0.0.1:{port}/dns-query` through tunnel/proxy path.
+- Control-plane mark bypass is used to avoid DNS self-interception loops.
+
+## Modes
+
+- `server` — forward proxy server (and optional auto SSH reverse tunnel)
+- `agent` — Linux transparent interception mode
+- `gateway` — Linux gateway mode
+- `run` — command-scoped proxy environment
+
+`run` examples:
 
 ```bash
-# Proxy host
-./sluice server --port 18080
-
-# From blocked host (SSH port 22)
-ssh -R 18080:localhost:18080 user@proxy-host -N
-
-# From blocked host (SSH port 220)
-ssh -p 220 -R 18080:localhost:18080 user@proxy-host -N
-
-# Agent
-sudo ./sluice agent --port 18080
+sluice run -- curl https://example.com
+sluice run --port 18080 -- curl https://example.com
+sluice run --proxy-host 127.0.0.1 --port 18080 -- curl https://example.com
 ```
+
+## Configuration
+
+- Server config: `configs/config.yaml`
+- Agent exclusions: `--no-proxy "*.internal.example,10.0.0.0/8"`
+- Agent mark controls:
+  - `--fwmark` for intercepted data path
+  - `--control-fwmark` for control-plane bypass traffic
 
 ## Docker
 
@@ -181,7 +106,7 @@ sudo ./sluice agent --port 18080
 docker run -d --name sluice-server \
   -v ~/.ssh:/root/.ssh:ro \
   ghcr.io/ggos3/sluice-server \
-  --tunnel user@remote-host --ssh-port 220
+  --tunnel user@blocked-host --ssh-port 220 --port 18080
 ```
 
 ### Agent image (Linux host)
@@ -190,25 +115,37 @@ docker run -d --name sluice-server \
 docker run -d --name sluice-agent \
   --net=host \
   --cap-add=NET_ADMIN \
-  ghcr.io/ggos3/sluice-agent
+  --cap-add=NET_RAW \
+  --device /dev/net/tun:/dev/net/tun \
+  ghcr.io/ggos3/sluice-agent \
+  --port 18080
 ```
 
-## Config and modes
+## E2E test
 
-- Server config: `configs/config.yaml`
-- Agent exclusions: `--no-proxy "*.internal.example,10.0.0.0/8"`
-- Modes:
-  - `server`
-  - `gateway` (Linux only)
-  - `agent` (Linux only)
-  - `run` (command-scoped proxy env)
-
-`run` mode examples:
+Run Docker-based firewall + tunnel end-to-end validation:
 
 ```bash
-./sluice run -- curl https://example.com
-./sluice run --port 18080 -- curl https://example.com
-./sluice run --proxy-host 127.0.0.1 --port 18080 -- curl https://example.com
+make e2e
+```
+
+This verifies:
+- firewall blocks direct agent -> server access
+- reverse tunnel is up
+- intercepted HTTP/HTTPS succeed through sluice
+
+## Manual install / uninstall
+
+If one-shot install is not possible (offline transfer, air-gapped workflow), see manual binary install steps in release assets:
+- Download `sluice-linux-amd64` or `sluice-linux-arm64`
+- Verify `sluice-checksums.txt`
+- Install to `/usr/local/bin/sluice`
+
+Manual uninstall:
+
+```bash
+sudo rm -f /usr/local/bin/sluice
+if [ -L /usr/bin/sluice ] && [ "$(readlink /usr/bin/sluice)" = "/usr/local/bin/sluice" ]; then sudo rm -f /usr/bin/sluice; fi
 ```
 
 ## Project structure
@@ -217,7 +154,7 @@ docker run -d --name sluice-agent \
 - `internal/proxy/` — HTTP/HTTPS proxy core
 - `internal/tunnel/` — SSH reverse tunnel manager
 - `internal/dns/` — DoH handler
-- `internal/gateway/` — transparent agent core
+- `internal/gateway/` — transparent agent core (TUN + nftables + policy routing)
 - `internal/rules/` — client bypass rules
 - `internal/acl/` — server whitelist
 
