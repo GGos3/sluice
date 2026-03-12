@@ -148,4 +148,27 @@ assert_failure "negative: direct access to server ${SERVER_IP}:18080 is blocked"
 assert_success "http: curl -fsS --max-time 30 http://example.com" "docker compose -f '$COMPOSE_FILE' exec -T agent curl -fsS --max-time 30 http://example.com >/dev/null"
 assert_success "https: curl -fsS --max-time 30 https://google.com" "docker compose -f '$COMPOSE_FILE' exec -T agent curl -fsS --max-time 30 https://google.com >/dev/null"
 
+log "testing runtime domain management via control socket"
+
+assert_success "rules: initially shows 'no rules'" \
+  "docker compose -f '$COMPOSE_FILE' exec -T server sluice server rules 2>&1 | grep -q 'no rules'"
+
+assert_success "deny: sluice server deny example.com succeeds" \
+  "docker compose -f '$COMPOSE_FILE' exec -T server sluice server deny example.com"
+
+assert_failure "deny: agent cannot reach denied example.com" \
+  "docker compose -f '$COMPOSE_FILE' exec -T agent curl -fsS --max-time 15 http://example.com >/dev/null 2>&1"
+
+assert_success "rules: lists denied example.com" \
+  "docker compose -f '$COMPOSE_FILE' exec -T server sluice server rules 2>&1 | grep -q 'deny.*example.com.*runtime'"
+
+assert_success "remove: sluice server remove example.com succeeds" \
+  "docker compose -f '$COMPOSE_FILE' exec -T server sluice server remove example.com"
+
+assert_success "remove: agent can reach example.com again" \
+  "docker compose -f '$COMPOSE_FILE' exec -T agent curl -fsS --max-time 30 http://example.com >/dev/null"
+
+assert_success "rules: no rules after remove" \
+  "docker compose -f '$COMPOSE_FILE' exec -T server sluice server rules 2>&1 | grep -q 'no rules'"
+
 pass "all E2E assertions passed"

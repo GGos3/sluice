@@ -16,4 +16,4 @@ EOF
 chmod 600 /root/.ssh/config
 
 # Start sluice server with SSH reverse tunnel
-exec sluice server --tunnel root@172.24.0.10 --ssh-port 22 --port 18080
+exec sluice server start root@172.24.0.10 --port 18080
