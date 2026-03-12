@@ -200,7 +200,7 @@ func nftU16(v uint16) []byte {
 
 func nftU32(v uint32) []byte {
 	b := make([]byte, 4)
-	binary.LittleEndian.PutUint32(b, v)
+	binary.BigEndian.PutUint32(b, v)
 	return b
 }
 
