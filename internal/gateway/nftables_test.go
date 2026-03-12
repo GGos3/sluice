@@ -4,6 +4,9 @@ package gateway
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -214,6 +217,101 @@ func TestNftablesReconcileIsIdempotent(t *testing.T) {
 	}
 	if got, want := conn.operations, []string{"ListTablesOfFamily", "DelTable", "Flush", "ListTablesOfFamily"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("operations = %#v, want %#v", got, want)
+	}
+}
+
+func TestDetectSSHPortsFollowsIncludeDirective(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	includeDir := filepath.Join(baseDir, "sshd_config.d")
+	if err := os.MkdirAll(includeDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	mainConfig := filepath.Join(baseDir, "sshd_config")
+	if err := os.WriteFile(mainConfig, []byte("Port 22\nInclude sshd_config.d/*.conf\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(main config) error = %v", err)
+	}
+
+	includeConfig := filepath.Join(includeDir, "custom.conf")
+	if err := os.WriteFile(includeConfig, []byte("Port 220\nListenAddress 0.0.0.0:2022\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(include config) error = %v", err)
+	}
+
+	got := detectSSHPorts(mainConfig)
+	want := []int{22, 220, 2022}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("detectSSHPorts() = %v, want %v", got, want)
+	}
+}
+
+func TestDetectSSHPortsSkipsInvalidIncludePattern(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	mainConfig := filepath.Join(baseDir, "sshd_config")
+	if err := os.WriteFile(mainConfig, []byte("Port 22\nInclude [broken\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(main config) error = %v", err)
+	}
+
+	got := detectSSHPorts(mainConfig)
+	want := []int{22}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("detectSSHPorts() = %v, want %v", got, want)
+	}
+}
+
+func TestCollectSSHPortsFromConfigAvoidsIncludeCycles(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	first := filepath.Join(baseDir, "first.conf")
+	second := filepath.Join(baseDir, "second.conf")
+
+	firstData := fmt.Sprintf("Port 22\nInclude %s\n", second)
+	if err := os.WriteFile(first, []byte(firstData), 0o644); err != nil {
+		t.Fatalf("WriteFile(first) error = %v", err)
+	}
+
+	secondData := fmt.Sprintf("Port 220\nInclude %s\n", first)
+	if err := os.WriteFile(second, []byte(secondData), 0o644); err != nil {
+		t.Fatalf("WriteFile(second) error = %v", err)
+	}
+
+	seen := make(map[int]struct{})
+	if err := collectSSHPortsFromConfig(first, seen, make(map[string]struct{})); err != nil {
+		t.Fatalf("collectSSHPortsFromConfig() error = %v", err)
+	}
+
+	if _, ok := seen[22]; !ok {
+		t.Fatal("port 22 not collected")
+	}
+	if _, ok := seen[220]; !ok {
+		t.Fatal("port 220 not collected")
+	}
+}
+
+func TestDetectSSHPortsFallsBackWhenIncludedFileUnreadable(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	mainConfig := filepath.Join(baseDir, "sshd_config")
+	brokenTarget := filepath.Join(baseDir, "missing-target.conf")
+	includeLink := filepath.Join(baseDir, "broken-include.conf")
+	if err := os.Symlink(brokenTarget, includeLink); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	config := fmt.Sprintf("Port 2022\nInclude %s\n", includeLink)
+	if err := os.WriteFile(mainConfig, []byte(config), 0o644); err != nil {
+		t.Fatalf("WriteFile(main config) error = %v", err)
+	}
+
+	got := detectSSHPorts(mainConfig)
+	want := []int{22}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("detectSSHPorts() = %v, want %v", got, want)
 	}
 }
 

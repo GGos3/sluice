@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -258,14 +259,40 @@ func detectSSHPorts(configPath string) []int {
 		configPath = defaultSSHDConfigPath
 	}
 
-	file, err := os.Open(configPath)
-	if err != nil {
+	seen := make(map[int]struct{})
+	if err := collectSSHPortsFromConfig(configPath, seen, make(map[string]struct{})); err != nil {
 		return []int{22}
 	}
-	defer file.Close()
 
-	seen := make(map[int]struct{})
-	ports := make([]int, 0)
+	ports := make([]int, 0, len(seen))
+	for port := range seen {
+		ports = append(ports, port)
+	}
+
+	if len(ports) == 0 {
+		return []int{22}
+	}
+
+	sort.Ints(ports)
+	return ports
+}
+
+func collectSSHPortsFromConfig(configPath string, seen map[int]struct{}, visited map[string]struct{}) error {
+	absPath, err := filepath.Abs(configPath)
+	if err != nil {
+		return err
+	}
+
+	if _, ok := visited[absPath]; ok {
+		return nil
+	}
+	visited[absPath] = struct{}{}
+
+	file, err := os.Open(absPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -289,31 +316,41 @@ func detectSSHPorts(configPath string) []int {
 		switch strings.ToLower(fields[0]) {
 		case "port":
 			if port, ok := parseSSHDPort(fields[1]); ok {
-				if _, exists := seen[port]; !exists {
-					seen[port] = struct{}{}
-					ports = append(ports, port)
-				}
+				seen[port] = struct{}{}
 			}
 		case "listenaddress":
 			if port, ok := parseListenAddressPort(fields[1]); ok {
-				if _, exists := seen[port]; !exists {
-					seen[port] = struct{}{}
-					ports = append(ports, port)
+				seen[port] = struct{}{}
+			}
+		case "include":
+			for _, include := range fields[1:] {
+				matches, err := resolveSSHDIncludeGlob(absPath, include)
+				if err != nil {
+					continue
+				}
+				for _, match := range matches {
+					if err := collectSSHPortsFromConfig(match, seen, visited); err != nil {
+						return err
+					}
 				}
 			}
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return []int{22}
+	return scanner.Err()
+}
+
+func resolveSSHDIncludeGlob(baseConfigPath, include string) ([]string, error) {
+	include = strings.TrimSpace(include)
+	if include == "" {
+		return nil, errors.New("empty include pattern")
 	}
 
-	if len(ports) == 0 {
-		return []int{22}
+	if !filepath.IsAbs(include) {
+		include = filepath.Join(filepath.Dir(baseConfigPath), include)
 	}
 
-	sort.Ints(ports)
-	return ports
+	return filepath.Glob(include)
 }
 
 func parseSSHDPort(value string) (int, bool) {
