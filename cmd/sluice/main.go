@@ -182,24 +182,33 @@ func serverStartCmd(ctx context.Context, args []string) error {
 	logDir := fs.String("log-dir", "/var/log/sluice", "log directory (daemon mode)")
 	socketPath := fs.String("socket", control.DefaultSocketPath, "control socket path")
 
-	// Handle -d alias for --daemon
-	for i, arg := range args {
-		if arg == "-d" {
-			args[i] = "--daemon"
+	// Extract positional tunnel target (user@host[:port]) before flag parsing.
+	// Go's flag package stops parsing at the first non-flag argument, so flags
+	// after the positional arg (e.g., "root@host --port 18080") would be lost.
+	var tunnelTarget string
+	flagArgs := make([]string, 0, len(args))
+	for _, arg := range args {
+		if tunnelTarget == "" && !strings.HasPrefix(arg, "-") && strings.Contains(arg, "@") {
+			tunnelTarget = arg
+		} else if arg == "-d" {
+			// Handle -d alias for --daemon
+			flagArgs = append(flagArgs, "--daemon")
+		} else {
+			flagArgs = append(flagArgs, arg)
 		}
 	}
 
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(flagArgs); err != nil {
 		if err == flag.ErrHelp {
 			return nil
 		}
 		return err
 	}
 
-	// Parse positional tunnel target from remaining args
-	var tunnelTarget string
-	if remaining := fs.Args(); len(remaining) > 0 {
-		tunnelTarget = remaining[0]
+	if tunnelTarget == "" {
+		if remaining := fs.Args(); len(remaining) > 0 {
+			tunnelTarget = remaining[0]
+		}
 	}
 	useTunnel := tunnelTarget != ""
 

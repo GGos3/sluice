@@ -156,6 +156,8 @@ assert_success "rules: initially shows 'no rules'" \
 assert_success "deny: sluice server deny example.com succeeds" \
   "docker compose -f '$COMPOSE_FILE' exec -T server sluice server deny example.com"
 
+sleep 2
+
 assert_failure "deny: agent cannot reach denied example.com" \
   "docker compose -f '$COMPOSE_FILE' exec -T agent curl -fsS --max-time 15 http://example.com >/dev/null 2>&1"
 
