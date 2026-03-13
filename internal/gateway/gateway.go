@@ -96,39 +96,18 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger) (runErr error) {
 		return fmt.Errorf("listen dns: %w", err)
 	}
 
-	httpListener, err := stack.ServeTCP(netip.AddrPortFrom(netip.IPv4Unspecified(), 80), func(conn net.Conn) {
-		handleForward(log, conn, "", func(ctx context.Context, dst netip.AddrPort, host string) error {
-			return dialer.ForwardHTTP(ctx, conn, dst, host)
-		})
+	stack.ServeTCPForwarder(map[uint16]TCPHandler{
+		80: func(conn net.Conn) {
+			handleForward(log, conn, "", func(ctx context.Context, dst netip.AddrPort, host string) error {
+				return dialer.ForwardHTTP(ctx, conn, dst, host)
+			})
+		},
+		443: func(conn net.Conn) {
+			handleForward(log, conn, normalizeConnHost(conn.LocalAddr()), func(ctx context.Context, dst netip.AddrPort, host string) error {
+				return dialer.ForwardHTTPS(ctx, conn, dst, host)
+			})
+		},
 	})
-	if err != nil {
-		return fmt.Errorf("listen http: %w", err)
-	}
-	defer func() {
-		if err := httpListener.Close(); err != nil {
-			closeErr = errors.Join(closeErr, fmt.Errorf("close http listener: %w", err))
-		}
-		if runErr == nil {
-			runErr = closeErr
-		}
-	}()
-
-	httpsListener, err := stack.ServeTCP(netip.AddrPortFrom(netip.IPv4Unspecified(), 443), func(conn net.Conn) {
-		handleForward(log, conn, normalizeConnHost(conn.LocalAddr()), func(ctx context.Context, dst netip.AddrPort, host string) error {
-			return dialer.ForwardHTTPS(ctx, conn, dst, host)
-		})
-	})
-	if err != nil {
-		return fmt.Errorf("listen https: %w", err)
-	}
-	defer func() {
-		if err := httpsListener.Close(); err != nil {
-			closeErr = errors.Join(closeErr, fmt.Errorf("close https listener: %w", err))
-		}
-		if runErr == nil {
-			runErr = closeErr
-		}
-	}()
 
 	log.Debug("gateway started", "tun", stack.Name(), "proxy_ip", proxyIP.String())
 

@@ -122,45 +122,33 @@ func (s *Stack) Name() string {
 	return s.tun.Name()
 }
 
-func (s *Stack) listenTCP(addr netip.AddrPort) (net.Listener, error) {
-	var wq waiter.Queue
-	ep, err := s.stack.NewEndpoint(tcp.ProtocolNumber, ipv4.ProtocolNumber, &wq)
-	if err != nil {
-		return nil, fmt.Errorf("new tcp endpoint for %s: %s", addr, err)
-	}
-	if err := ep.Bind(tcpip.FullAddress{Port: addr.Port()}); err != nil {
-		ep.Close()
-		return nil, fmt.Errorf("bind tcp %s: %s", addr, err)
-	}
-	if err := ep.Listen(10); err != nil {
-		ep.Close()
-		return nil, fmt.Errorf("listen tcp %s: %s", addr, err)
-	}
-	return gonet.NewTCPListener(s.stack, &wq, ep), nil
-}
-
-func (s *Stack) ServeTCP(addr netip.AddrPort, handler TCPHandler) (net.Listener, error) {
-	if handler == nil {
-		return nil, errors.New("tcp handler is required")
-	}
-	listener, err := s.listenTCP(addr)
-	if err != nil {
-		return nil, err
-	}
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			go handler(conn)
+// ServeTCPForwarder registers a global TCP forwarder that intercepts all
+// incoming TCP SYN packets and dispatches them by destination port.
+// This is required for transparent proxying because gvisor's endpoint-based
+// TCP listeners only match connections to locally-assigned addresses, while
+// intercepted traffic carries arbitrary destination IPs.
+func (s *Stack) ServeTCPForwarder(handlers map[uint16]TCPHandler) {
+	forwarder := tcp.NewForwarder(s.stack, 0, 256, func(request *tcp.ForwarderRequest) {
+		id := request.ID()
+		handler, ok := handlers[id.LocalPort]
+		if !ok {
+			request.Complete(true)
+			return
 		}
-	}()
-	return listener, nil
-}
 
-func (s *Stack) serveTCP(addr netip.AddrPort, handler TCPHandler) (net.Listener, error) {
-	return s.ServeTCP(addr, handler)
+		var wq waiter.Queue
+		ep, err := request.CreateEndpoint(&wq)
+		if err != nil {
+			request.Complete(true)
+			return
+		}
+		request.Complete(false)
+
+		conn := gonet.NewTCPConn(&wq, ep)
+		go handler(conn)
+	})
+
+	s.stack.SetTransportProtocolHandler(tcp.ProtocolNumber, forwarder.HandlePacket)
 }
 
 func (s *Stack) ServeDNS(addr netip.AddrPort, handler DNSHandler) error {
