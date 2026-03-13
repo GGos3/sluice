@@ -30,4 +30,4 @@ ip route replace 172.23.0.0/24 via 172.24.0.11 2>/dev/null || true
 /usr/sbin/sshd
 
 # Execute sluice agent
-exec sluice agent start --port 18080 --log-level debug
+exec sluice agent start --port 18080

@@ -77,6 +77,18 @@ func NewStack(name string, localAddr netip.Addr) (*Stack, error) {
 		return nil, fmt.Errorf("create nic: %s", err)
 	}
 
+	// Promiscuous + spoofing: accept packets for any destination IP and allow
+	// responses from non-local addresses. Required for transparent interception
+	// where inbound packets carry arbitrary destination IPs (not the NIC address).
+	if err := s.stack.SetPromiscuousMode(stackNICID, true); err != nil {
+		s.Close()
+		return nil, fmt.Errorf("set promiscuous mode: %s", err)
+	}
+	if err := s.stack.SetSpoofing(stackNICID, true); err != nil {
+		s.Close()
+		return nil, fmt.Errorf("set spoofing: %s", err)
+	}
+
 	if err := s.configure(localAddr); err != nil {
 		s.Close()
 		return nil, err
