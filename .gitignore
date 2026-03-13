@@ -6,3 +6,4 @@ coverage.html
 .docker/
 docker-buildx-cache/
 e2e/.ssh/
+.sisyphus/
