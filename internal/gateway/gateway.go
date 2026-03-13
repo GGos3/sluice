@@ -59,6 +59,19 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger) (runErr error) {
 		}
 	}()
 
+	var sysctl SysctlManager
+	if err := sysctl.DisableRPFilter(stack.Name()); err != nil {
+		return fmt.Errorf("disable rp_filter: %w", err)
+	}
+	defer func() {
+		if err := sysctl.Restore(); err != nil {
+			closeErr = errors.Join(closeErr, fmt.Errorf("restore sysctl: %w", err))
+		}
+		if runErr == nil {
+			runErr = closeErr
+		}
+	}()
+
 	routes := NewRouteManagerWithPolicy(cfg.RouteTable, cfg.RulePriority, cfg.Fwmark)
 	if err := routes.Setup(stack.Name(), proxyIP); err != nil {
 		return fmt.Errorf("setup routing: %w", err)
