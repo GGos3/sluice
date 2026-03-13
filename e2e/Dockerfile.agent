@@ -30,7 +30,7 @@ LABEL org.opencontainers.image.title="sluice-e2e-agent" \
       org.opencontainers.image.description="Sluice E2E agent with SSH server for tunnel testing"
 
 # Install SSH server and certificates
-RUN apk add --no-cache ca-certificates openssh-server bash iproute2 curl openssl
+RUN apk add --no-cache ca-certificates openssh-server bash iproute2 curl openssl nftables
 
 # Refresh CA certificates trust store
 RUN update-ca-certificates

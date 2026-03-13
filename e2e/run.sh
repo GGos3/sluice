@@ -142,6 +142,34 @@ wait_for "firewall FORWARD policy/rules queryable" "docker compose -f '$COMPOSE_
 wait_for "agent sshd listens on 22" "docker compose -f '$COMPOSE_FILE' exec -T agent sh -c 'ss -lnt | grep -Eq \"[:.]22\\s\"'"
 wait_for "server reports ssh reverse tunnel connected" "docker compose -f '$COMPOSE_FILE' logs server 2>&1 | grep -q 'ssh reverse tunnel connected'"
 wait_for "agent TUN device sluice0 exists" "docker compose -f '$COMPOSE_FILE' exec -T agent ip link show sluice0"
+
+log "=== DIAGNOSTIC: agent network state after TUN created ==="
+log "--- processes ---"
+"${COMPOSE[@]}" exec -T agent sh -c 'ps aux | grep sluice' 2>&1 || true
+log "--- /etc/resolv.conf ---"
+"${COMPOSE[@]}" exec -T agent cat /etc/resolv.conf 2>&1 || true
+log "--- ip rule show ---"
+"${COMPOSE[@]}" exec -T agent ip rule show 2>&1 || true
+log "--- ip route show table 100 ---"
+"${COMPOSE[@]}" exec -T agent ip route show table 100 2>&1 || true
+log "--- ip route show (main) ---"
+"${COMPOSE[@]}" exec -T agent ip route show 2>&1 || true
+log "--- nft list ruleset ---"
+"${COMPOSE[@]}" exec -T agent nft list ruleset 2>&1 || true
+log "--- ip addr show sluice0 ---"
+"${COMPOSE[@]}" exec -T agent ip addr show sluice0 2>&1 || true
+log "--- ss -tlnp (listening TCP) ---"
+"${COMPOSE[@]}" exec -T agent ss -tlnp 2>&1 || true
+log "--- ss -ulnp (listening UDP) ---"
+"${COMPOSE[@]}" exec -T agent ss -ulnp 2>&1 || true
+log "--- agent container logs (last 40 lines) ---"
+"${COMPOSE[@]}" logs --tail=40 agent 2>&1 || true
+log "--- server container logs (last 20 lines) ---"
+"${COMPOSE[@]}" logs --tail=20 server 2>&1 || true
+log "--- verbose curl attempt (5s timeout) ---"
+"${COMPOSE[@]}" exec -T agent curl -v --max-time 5 http://example.com 2>&1 || true
+log "=== END DIAGNOSTIC ==="
+
 wait_for "agent HTTP path through tunnel is reachable" "docker compose -f '$COMPOSE_FILE' exec -T agent curl -fsS --max-time 10 http://example.com >/dev/null"
 
 assert_failure "negative: direct access to server ${SERVER_IP}:18080 is blocked" "docker compose -f '$COMPOSE_FILE' exec -T agent curl -fsS --max-time 30 'http://${SERVER_IP}:18080' >/dev/null"
