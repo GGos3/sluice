@@ -96,7 +96,6 @@ func (m *NftablesManager) Setup() error {
 	})
 
 	conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: loopbackReturnExprs()})
-	conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: establishedRelatedReturnExprs()})
 
 	for _, port := range m.sshPortsValues() {
 		conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: sshBypassExprs(port)})
@@ -182,15 +181,6 @@ func controlMarkBypassExprs(controlMark int) []expr.Any {
 	return []expr.Any{
 		&expr.Meta{Key: expr.MetaKeyMARK, Register: nftReg1},
 		&expr.Cmp{Op: expr.CmpOpEq, Register: nftReg1, Data: nftU32(uint32(controlMark))},
-		&expr.Verdict{Kind: expr.VerdictReturn},
-	}
-}
-
-func establishedRelatedReturnExprs() []expr.Any {
-	return []expr.Any{
-		&expr.Ct{Key: expr.CtKeySTATE, Register: nftReg1},
-		&expr.Bitwise{SourceRegister: nftReg1, DestRegister: nftReg1, Len: 4, Mask: nftU32(expr.CtStateBitESTABLISHED | expr.CtStateBitRELATED), Xor: nftU32(0)},
-		&expr.Cmp{Op: expr.CmpOpNeq, Register: nftReg1, Data: nftU32(0)},
 		&expr.Verdict{Kind: expr.VerdictReturn},
 	}
 }
