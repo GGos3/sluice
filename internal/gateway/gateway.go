@@ -61,7 +61,7 @@ func Run(ctx context.Context, cfg *Config, log *slog.Logger) (runErr error) {
 
 	var sysctl SysctlManager
 	if err := sysctl.DisableRPFilter(stack.Name()); err != nil {
-		return fmt.Errorf("disable rp_filter: %w", err)
+		log.Warn("disable rp_filter failed, continuing", "error", err)
 	}
 	defer func() {
 		if err := sysctl.Restore(); err != nil {
