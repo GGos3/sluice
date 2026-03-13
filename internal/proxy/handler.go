@@ -86,6 +86,15 @@ func NewHandler(whitelist *acl.Whitelist, logger *slog.Logger, args ...any) *Han
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h.logger != nil {
+		h.logger.Info("ServeHTTP entry",
+			"method", r.Method,
+			"url", r.URL.String(),
+			"host", r.Host,
+			"remote", r.RemoteAddr,
+		)
+	}
+
 	if r.Method == http.MethodPost && r.URL != nil && !r.URL.IsAbs() && r.URL.Path == "/dns-query" {
 		if h.dnsHandler == nil {
 			http.NotFound(w, r)
@@ -134,13 +143,30 @@ func (h *Handler) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	domain := requestDomain(r)
 	bytesIn := requestBytes(r)
 
+	if h.logger != nil {
+		h.logger.Info("handleHTTP",
+			"domain", domain,
+			"method", r.Method,
+			"url", r.URL.String(),
+			"host", r.Host,
+		)
+	}
+
 	if !h.authorized(r) {
 		w.Header().Set("Proxy-Authenticate", `Basic realm="proxy"`)
 		h.writeErrorResponse(w, r, start, domain, bytesIn, http.StatusProxyAuthRequired, false, "proxy_auth_required")
 		return
 	}
 
-	if !h.isAllowed(domain) {
+	domainAllowed := h.isAllowed(domain)
+	if h.logger != nil {
+		h.logger.Info("isAllowed result",
+			"domain", domain,
+			"allowed", domainAllowed,
+		)
+	}
+
+	if !domainAllowed {
 		h.writeErrorResponse(w, r, start, domain, bytesIn, http.StatusForbidden, false, "domain_not_allowed")
 		return
 	}
