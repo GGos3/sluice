@@ -181,16 +181,35 @@ This verifies:
 
 ## Manual install / uninstall
 
-If one-shot install is not possible (offline transfer, air-gapped workflow), see manual binary install steps in release assets:
-- Download `sluice-linux-amd64` or `sluice-linux-arm64`
-- Verify `sluice-checksums.txt`
-- Install to `/usr/local/bin/sluice`
+For offline or air-gapped environments where the one-line install script cannot be used.
 
-Manual uninstall:
+### Install
 
 ```bash
-sudo rm -f /usr/local/bin/sluice
-if [ -L /usr/bin/sluice ] && [ "$(readlink /usr/bin/sluice)" = "/usr/local/bin/sluice" ]; then sudo rm -f /usr/bin/sluice; fi
+# Download binary (choose your platform)
+curl -fsSL -o sluice https://github.com/ggos3/sluice/releases/download/v0.1.0/sluice-linux-amd64
+
+# Verify checksum
+curl -fsSL -o sluice-checksums.txt https://github.com/ggos3/sluice/releases/download/v0.1.0/sluice-checksums.txt
+sha256sum -c --ignore-missing sluice-checksums.txt
+
+# Install to /usr/local/bin
+sudo install -m 0755 sluice /usr/local/bin/sluice
+
+# Create /usr/bin symlink for sudo compatibility
+# (sudo's secure_path typically includes /usr/bin but not /usr/local/bin)
+sudo ln -sf /usr/local/bin/sluice /usr/bin/sluice
+
+# Create config directory
+sudo mkdir -p /etc/sluice
+```
+
+Available binaries: `sluice-linux-amd64`, `sluice-linux-arm64`, `sluice-darwin-amd64`, `sluice-darwin-arm64`
+
+### Uninstall
+
+```bash
+sudo rm -f /usr/local/bin/sluice /usr/bin/sluice
 ```
 
 ## Project structure

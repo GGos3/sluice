@@ -181,16 +181,35 @@ make e2e
 
 ## 수동 설치 / 제거
 
-원샷 설치가 어려운 경우(오프라인 전송, 에어갭 환경 등)에는 릴리스 자산으로 수동 설치하세요:
-- `sluice-linux-amd64` 또는 `sluice-linux-arm64` 다운로드
-- `sluice-checksums.txt`로 무결성 검증
-- `/usr/local/bin/sluice`에 설치
+원샷 설치 스크립트를 사용할 수 없는 오프라인 / 에어갭 환경용입니다.
 
-수동 제거:
+### 설치
 
 ```bash
-sudo rm -f /usr/local/bin/sluice
-if [ -L /usr/bin/sluice ] && [ "$(readlink /usr/bin/sluice)" = "/usr/local/bin/sluice" ]; then sudo rm -f /usr/bin/sluice; fi
+# 바이너리 다운로드 (플랫폼에 맞게 선택)
+curl -fsSL -o sluice https://github.com/ggos3/sluice/releases/download/v0.1.0/sluice-linux-amd64
+
+# 체크섬 검증
+curl -fsSL -o sluice-checksums.txt https://github.com/ggos3/sluice/releases/download/v0.1.0/sluice-checksums.txt
+sha256sum -c --ignore-missing sluice-checksums.txt
+
+# /usr/local/bin에 설치
+sudo install -m 0755 sluice /usr/local/bin/sluice
+
+# sudo 호환 심링크 생성
+# (sudo의 secure_path에 /usr/bin은 포함되지만 /usr/local/bin은 빠져 있는 경우가 많습니다)
+sudo ln -sf /usr/local/bin/sluice /usr/bin/sluice
+
+# 설정 디렉토리 생성
+sudo mkdir -p /etc/sluice
+```
+
+제공되는 바이너리: `sluice-linux-amd64`, `sluice-linux-arm64`, `sluice-darwin-amd64`, `sluice-darwin-arm64`
+
+### 제거
+
+```bash
+sudo rm -f /usr/local/bin/sluice /usr/bin/sluice
 ```
 
 ## 프로젝트 구조
