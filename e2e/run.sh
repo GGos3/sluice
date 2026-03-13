@@ -150,9 +150,10 @@ assert_success "https: curl -fsS --max-time 30 https://google.com" "docker compo
 
 log "diagnostic: dumping agent network state"
 docker compose -f "$COMPOSE_FILE" exec -T agent ip route show 2>&1 || true
+docker compose -f "$COMPOSE_FILE" exec -T agent ip route show table 100 2>&1 || true
 docker compose -f "$COMPOSE_FILE" exec -T agent ip rule show 2>&1 || true
-docker compose -f "$COMPOSE_FILE" exec -T agent nft list ruleset 2>&1 || true
-docker compose -f "$COMPOSE_FILE" exec -T server ss -tlnp 2>&1 || true
+docker compose -f "$COMPOSE_FILE" exec -T agent sh -c 'apk add --no-cache nftables >/dev/null 2>&1; nft list ruleset' 2>&1 || true
+docker compose -f "$COMPOSE_FILE" exec -T agent ss -tlnp 2>&1 || true
 
 log "testing runtime domain management via control socket"
 
