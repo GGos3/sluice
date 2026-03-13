@@ -98,7 +98,8 @@ func (m *NftablesManager) Setup() error {
 	conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: loopbackReturnExprs()})
 
 	for _, port := range m.sshPortsValues() {
-		conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: sshBypassExprs(port)})
+		conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: sshDportBypassExprs(port)})
+		conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: sshSportBypassExprs(port)})
 	}
 
 	conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: controlMarkBypassExprs(m.controlMarkValue())})
@@ -167,11 +168,21 @@ func loopbackReturnExprs() []expr.Any {
 	}
 }
 
-func sshBypassExprs(port int) []expr.Any {
+func sshDportBypassExprs(port int) []expr.Any {
 	return []expr.Any{
 		&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: nftReg1},
 		&expr.Cmp{Op: expr.CmpOpEq, Register: nftReg1, Data: []byte{unix.IPPROTO_TCP}},
 		&expr.Payload{DestRegister: nftReg1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: nftReg1, Data: nftU16(uint16(port))},
+		&expr.Verdict{Kind: expr.VerdictReturn},
+	}
+}
+
+func sshSportBypassExprs(port int) []expr.Any {
+	return []expr.Any{
+		&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: nftReg1},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: nftReg1, Data: []byte{unix.IPPROTO_TCP}},
+		&expr.Payload{DestRegister: nftReg1, Base: expr.PayloadBaseTransportHeader, Offset: 0, Len: 2},
 		&expr.Cmp{Op: expr.CmpOpEq, Register: nftReg1, Data: nftU16(uint16(port))},
 		&expr.Verdict{Kind: expr.VerdictReturn},
 	}

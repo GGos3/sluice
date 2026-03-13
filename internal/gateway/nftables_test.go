@@ -51,7 +51,7 @@ func TestNftablesSetupCreatesOwnedRulesInOrder(t *testing.T) {
 		t.Fatalf("deletedTables[0].Name = %q, want %q", got, want)
 	}
 
-	if got, want := setupConn.operations, []string{"AddTable", "AddChain", "AddRule", "AddRule", "AddRule", "AddRule", "AddRule", "AddRule", "Flush"}; !reflect.DeepEqual(got, want) {
+	if got, want := setupConn.operations, []string{"AddTable", "AddChain", "AddRule", "AddRule", "AddRule", "AddRule", "AddRule", "AddRule", "AddRule", "AddRule", "Flush"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("setup operations = %#v, want %#v", got, want)
 	}
 	if got, want := len(setupConn.addedTables), 1; got != want {
@@ -60,7 +60,7 @@ func TestNftablesSetupCreatesOwnedRulesInOrder(t *testing.T) {
 	if got, want := len(setupConn.addedChains), 1; got != want {
 		t.Fatalf("addedChains = %d, want %d", got, want)
 	}
-	if got, want := len(setupConn.addedRules), 6; got != want {
+	if got, want := len(setupConn.addedRules), 8; got != want {
 		t.Fatalf("addedRules = %d, want %d", got, want)
 	}
 
@@ -90,11 +90,13 @@ func TestNftablesSetupCreatesOwnedRulesInOrder(t *testing.T) {
 	}
 
 	assertLoopbackRule(t, setupConn.addedRules[0], table, chain)
-	assertSSHBypassRule(t, setupConn.addedRules[1], table, chain, 22)
-	assertSSHBypassRule(t, setupConn.addedRules[2], table, chain, 220)
-	assertControlBypassRule(t, setupConn.addedRules[3], table, chain, 0x2)
-	assertMarkRule(t, setupConn.addedRules[4], table, chain, unix.IPPROTO_TCP, 0x9)
-	assertMarkRule(t, setupConn.addedRules[5], table, chain, unix.IPPROTO_UDP, 0x9)
+	assertSSHBypassRule(t, setupConn.addedRules[1], table, chain, 22, 2)
+	assertSSHBypassRule(t, setupConn.addedRules[2], table, chain, 22, 0)
+	assertSSHBypassRule(t, setupConn.addedRules[3], table, chain, 220, 2)
+	assertSSHBypassRule(t, setupConn.addedRules[4], table, chain, 220, 0)
+	assertControlBypassRule(t, setupConn.addedRules[5], table, chain, 0x2)
+	assertMarkRule(t, setupConn.addedRules[6], table, chain, unix.IPPROTO_TCP, 0x9)
+	assertMarkRule(t, setupConn.addedRules[7], table, chain, unix.IPPROTO_UDP, 0x9)
 	if got, want := setupConn.flushCalls, 1; got != want {
 		t.Fatalf("flushCalls = %d, want %d", got, want)
 	}
@@ -188,13 +190,14 @@ func TestNftablesSetupUsesDefaultFwmark(t *testing.T) {
 		t.Fatalf("Setup() error = %v", err)
 	}
 
-	if got, want := len(setupConn.addedRules), 5; got != want {
+	if got, want := len(setupConn.addedRules), 6; got != want {
 		t.Fatalf("addedRules = %d, want %d", got, want)
 	}
-	assertSSHBypassRule(t, setupConn.addedRules[1], setupConn.addedTables[0], setupConn.addedChains[0], 22)
-	assertControlBypassRule(t, setupConn.addedRules[2], setupConn.addedTables[0], setupConn.addedChains[0], defaultControlMark)
-	assertMarkRule(t, setupConn.addedRules[3], setupConn.addedTables[0], setupConn.addedChains[0], unix.IPPROTO_TCP, defaultFwmark)
-	assertMarkRule(t, setupConn.addedRules[4], setupConn.addedTables[0], setupConn.addedChains[0], unix.IPPROTO_UDP, defaultFwmark)
+	assertSSHBypassRule(t, setupConn.addedRules[1], setupConn.addedTables[0], setupConn.addedChains[0], 22, 2)
+	assertSSHBypassRule(t, setupConn.addedRules[2], setupConn.addedTables[0], setupConn.addedChains[0], 22, 0)
+	assertControlBypassRule(t, setupConn.addedRules[3], setupConn.addedTables[0], setupConn.addedChains[0], defaultControlMark)
+	assertMarkRule(t, setupConn.addedRules[4], setupConn.addedTables[0], setupConn.addedChains[0], unix.IPPROTO_TCP, defaultFwmark)
+	assertMarkRule(t, setupConn.addedRules[5], setupConn.addedTables[0], setupConn.addedChains[0], unix.IPPROTO_UDP, defaultFwmark)
 }
 
 func TestNftablesReconcileIsIdempotent(t *testing.T) {
@@ -438,7 +441,7 @@ func assertLoopbackRule(t *testing.T, rule *nftables.Rule, table *nftables.Table
 	}
 }
 
-func assertSSHBypassRule(t *testing.T, rule *nftables.Rule, table *nftables.Table, chain *nftables.Chain, port int) {
+func assertSSHBypassRule(t *testing.T, rule *nftables.Rule, table *nftables.Table, chain *nftables.Chain, port int, portOffset uint32) {
 	t.Helper()
 	assertRuleLocation(t, rule, table, chain)
 	if got, want := len(rule.Exprs), 5; got != want {
@@ -474,7 +477,7 @@ func assertSSHBypassRule(t *testing.T, rule *nftables.Rule, table *nftables.Tabl
 	if got, want := payload.Base, expr.PayloadBaseTransportHeader; got != want {
 		t.Fatalf("payload.Base = %v, want %v", got, want)
 	}
-	if got, want := payload.Offset, uint32(2); got != want {
+	if got, want := payload.Offset, portOffset; got != want {
 		t.Fatalf("payload.Offset = %d, want %d", got, want)
 	}
 	if got, want := payload.Len, uint32(2); got != want {
