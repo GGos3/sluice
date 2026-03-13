@@ -55,8 +55,10 @@ curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.s
 ### 2) Start proxy server + reverse tunnel orchestration
 
 ```bash
-sluice server --tunnel user@blocked-host --ssh-port 220 --port 18080
+sluice server user@blocked-host:220 --port 18080
 ```
+
+The tunnel target is a positional argument in `user@host[:port]` format. SSH port defaults to 22 if omitted.
 
 ### 3) Start agent on blocked host (Linux)
 
@@ -70,17 +72,60 @@ sudo sluice agent --port 18080
 curl https://github.com
 ```
 
+## Daemon mode
+
+Both `server` and `agent` support `--daemon` (or `-d`) to run as a background process:
+
+```bash
+sluice server user@blocked-host -d --port 18080
+sluice server stop
+
+sudo sluice agent -d --port 18080
+sluice agent stop
+```
+
+PID files are written to `/var/run/sluice/` and logs to `/var/log/sluice/`.
+
+Systemd unit files are also available under `configs/`:
+
+```bash
+sudo cp configs/sluice-server.service /etc/systemd/system/
+sudo systemctl enable --now sluice-server
+```
+
+## Runtime domain management
+
+Control the server's domain rules at runtime (requires the server to be running):
+
+```bash
+sluice server deny example.com      # block a domain
+sluice server allow example.com     # allow a domain
+sluice server remove example.com    # remove a runtime rule
+sluice server rules                 # list active rules
+```
+
+Runtime rules are in-memory only; `config.yaml` remains the source of truth after restart.
+
 ## DNS path
 
 - Agent intercepts DNS (`:53`) and relays upstream using DoH to server `http://127.0.0.1:{port}/dns-query` through tunnel/proxy path.
 - Control-plane mark bypass is used to avoid DNS self-interception loops.
 
-## Modes
+## CLI reference
 
-- `server` — forward proxy server (and optional auto SSH reverse tunnel)
-- `agent` — Linux transparent interception mode
-- `gateway` — Linux gateway mode
-- `run` — command-scoped proxy environment
+```text
+sluice server [start] [user@host[:port]] [flags]   Start the proxy server
+sluice server stop                                  Stop the server daemon
+sluice server deny <domain>                         Block a domain at runtime
+sluice server allow <domain>                        Allow a domain at runtime
+sluice server remove <domain>                       Remove a runtime rule
+sluice server rules                                 List active rules
+sluice agent [start] [flags]                        Start transparent proxy agent (Linux)
+sluice agent stop                                   Stop the agent daemon
+sluice run [flags] [-- cmd]                         Run a command with proxy env vars
+sluice gateway [flags]                              Run as transparent proxy gateway (Linux)
+sluice version                                      Show version
+```
 
 `run` examples:
 
@@ -106,7 +151,7 @@ sluice run --proxy-host 127.0.0.1 --port 18080 -- curl https://example.com
 docker run -d --name sluice-server \
   -v ~/.ssh:/root/.ssh:ro \
   ghcr.io/ggos3/sluice-server \
-  --tunnel user@blocked-host --ssh-port 220 --port 18080
+  user@blocked-host:220 --port 18080
 ```
 
 ### Agent image (Linux host)
@@ -156,7 +201,9 @@ if [ -L /usr/bin/sluice ] && [ "$(readlink /usr/bin/sluice)" = "/usr/local/bin/s
 - `internal/dns/` — DoH handler
 - `internal/gateway/` — transparent agent core (TUN + nftables + policy routing)
 - `internal/rules/` — client bypass rules
-- `internal/acl/` — server whitelist
+- `internal/acl/` — server whitelist + runtime deny/allow
+- `internal/control/` — Unix socket IPC for runtime domain management
+- `internal/daemon/` — process daemonization and PID file management
 
 ## License
 

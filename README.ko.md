@@ -55,8 +55,10 @@ curl -fsSL https://raw.githubusercontent.com/ggos3/sluice/main/scripts/install.s
 ### 2) 프록시 서버 + 리버스 터널 오케스트레이션 시작
 
 ```bash
-sluice server --tunnel user@blocked-host --ssh-port 220 --port 18080
+sluice server user@blocked-host:220 --port 18080
 ```
+
+터널 대상은 `user@host[:port]` 형식의 위치 인수입니다. SSH 포트를 생략하면 기본값 22가 사용됩니다.
 
 ### 3) 차단된 호스트에서 agent 시작 (Linux)
 
@@ -70,17 +72,60 @@ sudo sluice agent --port 18080
 curl https://github.com
 ```
 
+## 데몬 모드
+
+`server`와 `agent` 모두 `--daemon`(또는 `-d`)으로 백그라운드 프로세스로 실행할 수 있습니다:
+
+```bash
+sluice server user@blocked-host -d --port 18080
+sluice server stop
+
+sudo sluice agent -d --port 18080
+sluice agent stop
+```
+
+PID 파일은 `/var/run/sluice/`, 로그는 `/var/log/sluice/`에 기록됩니다.
+
+systemd 유닛 파일도 `configs/` 디렉토리에 제공됩니다:
+
+```bash
+sudo cp configs/sluice-server.service /etc/systemd/system/
+sudo systemctl enable --now sluice-server
+```
+
+## 런타임 도메인 관리
+
+서버 실행 중 도메인 규칙을 동적으로 제어할 수 있습니다:
+
+```bash
+sluice server deny example.com      # 도메인 차단
+sluice server allow example.com     # 도메인 허용
+sluice server remove example.com    # 런타임 규칙 제거
+sluice server rules                 # 활성 규칙 목록
+```
+
+런타임 규칙은 메모리에만 유지되며, 재시작 시 `config.yaml`이 원본이 됩니다.
+
 ## DNS 경로
 
 - Agent가 DNS(`:53`)를 인터셉트하고, DoH로 `http://127.0.0.1:{port}/dns-query`에 relay합니다.
 - DNS 자기재귀 루프 방지를 위해 control-plane mark bypass를 사용합니다.
 
-## 모드
+## CLI 레퍼런스
 
-- `server` — 포워드 프록시 서버(및 선택적 자동 SSH reverse tunnel)
-- `agent` — Linux 투명 인터셉트 모드
-- `gateway` — Linux 게이트웨이 모드
-- `run` — 명령 단위 프록시 환경
+```text
+sluice server [start] [user@host[:port]] [flags]   프록시 서버 시작
+sluice server stop                                  서버 데몬 중지
+sluice server deny <domain>                         런타임 도메인 차단
+sluice server allow <domain>                        런타임 도메인 허용
+sluice server remove <domain>                       런타임 규칙 제거
+sluice server rules                                 활성 규칙 목록
+sluice agent [start] [flags]                        투명 프록시 에이전트 시작 (Linux)
+sluice agent stop                                   에이전트 데몬 중지
+sluice run [flags] [-- cmd]                         프록시 환경변수 설정 후 명령 실행
+sluice gateway [flags]                              투명 프록시 게이트웨이 (Linux)
+sluice version                                      버전 정보
+```
 
 `run` 예시:
 
@@ -106,7 +151,7 @@ sluice run --proxy-host 127.0.0.1 --port 18080 -- curl https://example.com
 docker run -d --name sluice-server \
   -v ~/.ssh:/root/.ssh:ro \
   ghcr.io/ggos3/sluice-server \
-  --tunnel user@blocked-host --ssh-port 220 --port 18080
+  user@blocked-host:220 --port 18080
 ```
 
 ### 에이전트 이미지 (Linux host)
@@ -156,7 +201,9 @@ if [ -L /usr/bin/sluice ] && [ "$(readlink /usr/bin/sluice)" = "/usr/local/bin/s
 - `internal/dns/` — DoH 핸들러
 - `internal/gateway/` — 투명 에이전트 핵심(TUN + nftables + policy routing)
 - `internal/rules/` — 클라이언트 우회 규칙
-- `internal/acl/` — 서버 화이트리스트
+- `internal/acl/` — 서버 화이트리스트 + 런타임 deny/allow
+- `internal/control/` — Unix 소켓 IPC (런타임 도메인 관리)
+- `internal/daemon/` — 프로세스 데몬화 및 PID 파일 관리
 
 ## 라이선스
 
