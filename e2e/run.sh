@@ -148,6 +148,12 @@ assert_failure "negative: direct access to server ${SERVER_IP}:18080 is blocked"
 assert_success "http: curl -fsS --max-time 30 http://example.com" "docker compose -f '$COMPOSE_FILE' exec -T agent curl -fsS --max-time 30 http://example.com >/dev/null"
 assert_success "https: curl -fsS --max-time 30 https://google.com" "docker compose -f '$COMPOSE_FILE' exec -T agent curl -fsS --max-time 30 https://google.com >/dev/null"
 
+log "diagnostic: dumping agent network state"
+docker compose -f "$COMPOSE_FILE" exec -T agent ip route show 2>&1 || true
+docker compose -f "$COMPOSE_FILE" exec -T agent ip rule show 2>&1 || true
+docker compose -f "$COMPOSE_FILE" exec -T agent nft list ruleset 2>&1 || true
+docker compose -f "$COMPOSE_FILE" exec -T server ss -tlnp 2>&1 || true
+
 log "testing runtime domain management via control socket"
 
 assert_success "rules: initially shows 'no rules'" \
@@ -157,6 +163,9 @@ assert_success "deny: sluice server deny example.com succeeds" \
   "docker compose -f '$COMPOSE_FILE' exec -T server sluice server deny example.com"
 
 sleep 2
+
+log "diagnostic: testing deny from server side (direct proxy request)"
+docker compose -f "$COMPOSE_FILE" exec -T server sh -c 'http_proxy=http://127.0.0.1:18080 wget -q -O /dev/null --timeout=10 http://example.com' 2>&1 || log "diagnostic: server-side proxy request denied as expected"
 
 assert_failure "deny: agent cannot reach denied example.com" \
   "docker compose -f '$COMPOSE_FILE' exec -T agent curl -fsS --max-time 15 http://example.com >/dev/null 2>&1"
